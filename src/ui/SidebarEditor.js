@@ -1,0 +1,433 @@
+// src/ui/SidebarEditor.js
+
+export class SidebarEditor {
+  constructor(config) {
+    this.container = config.container;
+    this.onTableSelect = config.onTableSelect;
+    this.onTableUpdate = config.onTableUpdate;
+    this.onTableDelete = config.onTableDelete;
+    this.onTableDuplicate = config.onTableDuplicate;
+    this.onFieldAdd = config.onFieldAdd;
+    this.onFieldUpdate = config.onFieldUpdate;
+    this.onFieldDelete = config.onFieldDelete;
+    this.onGroupUpdate = config.onGroupUpdate;
+    this.onGroupDelete = config.onGroupDelete;
+    this.onBatchDelete = config.onBatchDelete;
+    this.onBatchGroup = config.onBatchGroup;
+  }
+
+  render(tables, selectedTableIds, groups = []) {
+    this.container.innerHTML = "";
+
+    const selectedSet = selectedTableIds instanceof Set 
+      ? selectedTableIds 
+      : new Set(selectedTableIds ? [selectedTableIds] : []);
+
+    if (selectedSet.size > 1) {
+      this.renderBatchEditor(selectedSet, tables, groups);
+      return;
+    }
+
+    if (tables.length === 0) {
+      this.container.innerHTML = `
+        <div class="editor-empty">
+          <i data-lucide="mouse-pointer-click" class="empty-icon"></i>
+          <p>No hay tablas en el diagrama. Agrega una nueva tabla para empezar.</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    tables.forEach(table => {
+      const isExpanded = selectedSet.has(table.id);
+      const accordionItem = this._createAccordionItem(table, isExpanded, groups);
+      this.container.appendChild(accordionItem);
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  _createAccordionItem(table, isExpanded, groups = []) {
+    const accordionItem = document.createElement("div");
+    accordionItem.className = `table-accordion-item ${isExpanded ? "expanded" : ""}`;
+    accordionItem.dataset.id = table.id;
+
+    // Header
+    const header = document.createElement("div");
+    header.className = "table-accordion-header";
+    header.innerHTML = `
+      <div class="drag-handle"><i data-lucide="grip-vertical"></i></div>
+      <h3>${table.name}</h3>
+      <i data-lucide="chevron-down"></i>
+    `;
+    
+    header.addEventListener("click", (e) => {
+      if (!e.target.closest(".drag-handle")) {
+        // Toggle selection
+        if (isExpanded) {
+          this.onTableSelect(null);
+        } else {
+          this.onTableSelect(table.id);
+        }
+      }
+    });
+
+    accordionItem.appendChild(header);
+
+    // Content
+    const content = document.createElement("div");
+    content.className = "table-accordion-content";
+    
+    // Table Name Editor
+    const nameGroup = document.createElement("div");
+    nameGroup.className = "form-group";
+    nameGroup.innerHTML = `
+      <label>Nombre de la Tabla</label>
+      <input type="text" class="edit-table-name-input" value="${table.name}" />
+    `;
+    const nameInput = nameGroup.querySelector("input");
+    
+    nameInput.addEventListener("change", (e) => {
+      // Clean table name: lowercase and alphanumeric only (no spaces/special chars)
+      const cleanName = e.target.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+      e.target.value = cleanName;
+      this.onTableUpdate(table.id, { name: cleanName });
+    });
+    content.appendChild(nameGroup);
+
+    // Table Color Selector
+    const colorGroup = document.createElement("div");
+    colorGroup.className = "form-group";
+    colorGroup.style.marginTop = "10px";
+    colorGroup.innerHTML = `
+      <label>Color de Cabecera</label>
+      <div class="color-presets-wrapper" style="display: flex; align-items: center; gap: 8px; margin-top: 5px;">
+        <button class="color-preset" style="background-color: #6366f1; width: 20px; height: 20px; border-radius: 50%; border: 2px solid ${table.color === '#6366f1' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#6366f1"></button>
+        <button class="color-preset" style="background-color: #10b981; width: 20px; height: 20px; border-radius: 50%; border: 2px solid ${table.color === '#10b981' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#10b981"></button>
+        <button class="color-preset" style="background-color: #f43f5e; width: 20px; height: 20px; border-radius: 50%; border: 2px solid ${table.color === '#f43f5e' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#f43f5e"></button>
+        <button class="color-preset" style="background-color: #f59e0b; width: 20px; height: 20px; border-radius: 50%; border: 2px solid ${table.color === '#f59e0b' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#f59e0b"></button>
+        <button class="color-preset" style="background-color: #8b5cf6; width: 20px; height: 20px; border-radius: 50%; border: 2px solid ${table.color === '#8b5cf6' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#8b5cf6"></button>
+        <button class="color-preset" style="background-color: #0ea5e9; width: 20px; height: 20px; border-radius: 50%; border: 2px solid ${table.color === '#0ea5e9' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#0ea5e9"></button>
+        <input type="color" class="table-custom-color-picker" value="${table.color || '#6366f1'}" style="width: 24px; height: 24px; border: none; padding: 0; background: none; cursor: pointer;" />
+      </div>
+    `;
+
+    colorGroup.querySelectorAll(".color-preset").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const color = btn.dataset.color;
+        this.onTableUpdate(table.id, { color });
+      });
+    });
+
+    const tableColorPicker = colorGroup.querySelector(".table-custom-color-picker");
+    tableColorPicker.addEventListener("change", (e) => {
+      const color = e.target.value;
+      this.onTableUpdate(table.id, { color });
+    });
+
+    content.appendChild(colorGroup);
+
+    // Group Assignment Selector
+    const groupSelectGroup = document.createElement("div");
+    groupSelectGroup.className = "form-group";
+    groupSelectGroup.style.marginTop = "10px";
+    
+    let groupOptions = `<option value="">Ninguno</option>`;
+    groups.forEach(g => {
+      groupOptions += `<option value="${g.id}" ${table.groupId === g.id ? 'selected' : ''}>${g.name}</option>`;
+    });
+
+    groupSelectGroup.innerHTML = `
+      <label>Grupo</label>
+      <select class="table-group-select">
+        ${groupOptions}
+      </select>
+    `;
+
+    const groupSelectEl = groupSelectGroup.querySelector(".table-group-select");
+    groupSelectEl.addEventListener("change", (e) => {
+      const selectedGroupId = e.target.value || null;
+      this.onTableUpdate(table.id, { groupId: selectedGroupId });
+    });
+    content.appendChild(groupSelectGroup);
+
+    // Header for fields list
+    const fieldsHeader = document.createElement("div");
+    fieldsHeader.className = "field-list-header";
+    fieldsHeader.innerHTML = `<span>Campos</span>`;
+    content.appendChild(fieldsHeader);
+
+    // Fields List
+    const fieldsList = document.createElement("div");
+    fieldsList.className = "fields-list";
+    table.fields.forEach(field => {
+      fieldsList.appendChild(this._createFieldEditorItem(table.id, field));
+    });
+    content.appendChild(fieldsList);
+
+    // Button: Add Field
+    const addFieldBtn = document.createElement("button");
+    addFieldBtn.className = "btn btn-secondary btn-sm btn-full";
+    addFieldBtn.style.marginTop = "10px";
+    addFieldBtn.innerHTML = `<i data-lucide="plus"></i> Agregar Campo`;
+    addFieldBtn.addEventListener("click", () => {
+      this.onFieldAdd(table.id);
+    });
+    content.appendChild(addFieldBtn);
+
+    // Button: Duplicate Table
+    const duplicateTableBtn = document.createElement("button");
+    duplicateTableBtn.className = "btn btn-secondary btn-sm btn-full";
+    duplicateTableBtn.style.marginTop = "8px";
+    duplicateTableBtn.innerHTML = `<i data-lucide="copy"></i> Duplicar Tabla`;
+    duplicateTableBtn.addEventListener("click", () => {
+      if (this.onTableDuplicate) this.onTableDuplicate(table.id);
+    });
+    content.appendChild(duplicateTableBtn);
+
+    // Button: Delete Table
+    const deleteTableBtn = document.createElement("button");
+    deleteTableBtn.className = "btn btn-danger-outline btn-sm btn-full";
+    deleteTableBtn.style.marginTop = "8px";
+    deleteTableBtn.innerHTML = `<i data-lucide="trash-2"></i> Eliminar Tabla`;
+    deleteTableBtn.addEventListener("click", () => {
+      this.onTableDelete(table.id);
+    });
+    content.appendChild(deleteTableBtn);
+
+    accordionItem.appendChild(content);
+    return accordionItem;
+  }
+
+  _createFieldEditorItem(tableId, field) {
+    const item = document.createElement("div");
+    item.className = "field-editor-item";
+
+    const pkChecked = field.isPK ? "checked" : "";
+    const aiChecked = field.isAutoIncrement ? "checked" : "";
+    const nnChecked = field.isNotNull ? "checked" : "";
+    const uqChecked = field.isUnique ? "checked" : "";
+    const defValue = field.defaultValue || "";
+
+    item.innerHTML = `
+      <div class="field-editor-row-main">
+        <input type="text" class="field-name-input" value="${field.name}" placeholder="nombre_campo">
+        <select class="field-type-select">
+          <option value="INT" ${field.type === 'INT' ? 'selected' : ''}>INT</option>
+          <option value="VARCHAR(255)" ${field.type === 'VARCHAR(255)' ? 'selected' : ''}>VARCHAR(255)</option>
+          <option value="VARCHAR(50)" ${field.type === 'VARCHAR(50)' ? 'selected' : ''}>VARCHAR(50)</option>
+          <option value="TEXT" ${field.type === 'TEXT' ? 'selected' : ''}>TEXT</option>
+          <option value="BOOLEAN" ${field.type === 'BOOLEAN' ? 'selected' : ''}>BOOLEAN</option>
+          <option value="TIMESTAMP" ${field.type === 'TIMESTAMP' ? 'selected' : ''}>TIMESTAMP</option>
+          <option value="DECIMAL(10,2)" ${field.type === 'DECIMAL(10,2)' ? 'selected' : ''}>DECIMAL(10,2)</option>
+          <option value="DATE" ${field.type === 'DATE' ? 'selected' : ''}>DATE</option>
+        </select>
+        <label class="field-checkbox-label ${pkChecked}" title="Llave Primaria (PK)">
+          <input type="checkbox" class="field-pk-checkbox" ${field.isPK ? 'checked' : ''}>
+          PK
+        </label>
+        <button class="btn-icon btn-delete-field" title="Eliminar campo"><i data-lucide="trash-2"></i></button>
+      </div>
+      <div class="field-advanced-options">
+        <label class="adv-checkbox" title="Auto Increment"><input type="checkbox" class="field-ai-checkbox" ${field.isAutoIncrement ? 'checked' : ''}> A.I.</label>
+        <label class="adv-checkbox" title="Not Null"><input type="checkbox" class="field-nn-checkbox" ${field.isNotNull ? 'checked' : ''}> N.N.</label>
+        <label class="adv-checkbox" title="Unique"><input type="checkbox" class="field-uq-checkbox" ${field.isUnique ? 'checked' : ''}> U.Q.</label>
+        <div class="adv-default">
+          <span>Def:</span>
+          <input type="text" class="field-default-input" value="${defValue}" placeholder="Ej: '0'">
+        </div>
+      </div>
+    `;
+
+    // Event listeners
+    const nameInput = item.querySelector(".field-name-input");
+    nameInput.addEventListener("change", (e) => {
+      this.onFieldUpdate(tableId, field.id, { name: e.target.value.trim() });
+    });
+
+    const typeSelect = item.querySelector(".field-type-select");
+    typeSelect.addEventListener("change", (e) => {
+      this.onFieldUpdate(tableId, field.id, { type: e.target.value });
+    });
+
+    const pkCheckbox = item.querySelector(".field-pk-checkbox");
+    pkCheckbox.addEventListener("change", (e) => {
+      this.onFieldUpdate(tableId, field.id, { isPK: e.target.checked });
+    });
+
+    const deleteBtn = item.querySelector(".btn-delete-field");
+    deleteBtn.addEventListener("click", () => {
+      this.onFieldDelete(tableId, field.id);
+    });
+
+    const aiCheckbox = item.querySelector(".field-ai-checkbox");
+    aiCheckbox.addEventListener("change", (e) => {
+      this.onFieldUpdate(tableId, field.id, { isAutoIncrement: e.target.checked });
+    });
+
+    const nnCheckbox = item.querySelector(".field-nn-checkbox");
+    nnCheckbox.addEventListener("change", (e) => {
+      this.onFieldUpdate(tableId, field.id, { isNotNull: e.target.checked });
+    });
+
+    const uqCheckbox = item.querySelector(".field-uq-checkbox");
+    uqCheckbox.addEventListener("change", (e) => {
+      this.onFieldUpdate(tableId, field.id, { isUnique: e.target.checked });
+    });
+
+    const defaultInput = item.querySelector(".field-default-input");
+    defaultInput.addEventListener("change", (e) => {
+      this.onFieldUpdate(tableId, field.id, { defaultValue: e.target.value.trim() });
+    });
+
+    return item;
+  }
+
+  renderGroupEditor(group, groups) {
+    this.container.innerHTML = "";
+
+    if (!group) {
+      this.container.innerHTML = `
+        <div class="editor-empty">
+          <i data-lucide="mouse-pointer-click" class="empty-icon"></i>
+          <p>Grupo no encontrado.</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    const editorEl = document.createElement("div");
+    editorEl.className = "group-editor-panel";
+    editorEl.style.padding = "20px";
+    editorEl.style.display = "flex";
+    editorEl.style.flexDirection = "column";
+    editorEl.style.gap = "15px";
+
+    // Title
+    const header = document.createElement("div");
+    header.className = "section-title";
+    header.style.marginBottom = "10px";
+    header.innerHTML = `
+      <h3>Editar Grupo</h3>
+      <button class="btn btn-secondary btn-sm btn-back-to-tables"><i data-lucide="arrow-left"></i> Volver</button>
+    `;
+    header.querySelector(".btn-back-to-tables").addEventListener("click", () => {
+      this.onTableSelect(null); // This clears group selection and shows tables list
+    });
+    editorEl.appendChild(header);
+
+    // Group Name
+    const nameGroup = document.createElement("div");
+    nameGroup.className = "form-group";
+    nameGroup.innerHTML = `
+      <label>Nombre del Grupo</label>
+      <input type="text" class="edit-group-name-input" value="${group.name}" />
+    `;
+    const nameInput = nameGroup.querySelector("input");
+    nameInput.addEventListener("change", (e) => {
+      const cleanName = e.target.value.trim();
+      this.onGroupUpdate(group.id, { name: cleanName });
+    });
+    editorEl.appendChild(nameGroup);
+
+    // Group Color Presets
+    const colorGroup = document.createElement("div");
+    colorGroup.className = "form-group";
+    colorGroup.innerHTML = `
+      <label>Color del Grupo</label>
+      <div class="color-presets-wrapper" style="display: flex; align-items: center; gap: 8px; margin-top: 5px;">
+        <button class="color-preset" style="background-color: #6366f1; width: 24px; height: 24px; border-radius: 50%; border: 2px solid ${group.color === '#6366f1' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#6366f1"></button>
+        <button class="color-preset" style="background-color: #10b981; width: 24px; height: 24px; border-radius: 50%; border: 2px solid ${group.color === '#10b981' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#10b981"></button>
+        <button class="color-preset" style="background-color: #f43f5e; width: 24px; height: 24px; border-radius: 50%; border: 2px solid ${group.color === '#f43f5e' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#f43f5e"></button>
+        <button class="color-preset" style="background-color: #f59e0b; width: 24px; height: 24px; border-radius: 50%; border: 2px solid ${group.color === '#f59e0b' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#f59e0b"></button>
+        <button class="color-preset" style="background-color: #8b5cf6; width: 24px; height: 24px; border-radius: 50%; border: 2px solid ${group.color === '#8b5cf6' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#8b5cf6"></button>
+        <button class="color-preset" style="background-color: #0ea5e9; width: 24px; height: 24px; border-radius: 50%; border: 2px solid ${group.color === '#0ea5e9' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#0ea5e9"></button>
+        <button class="color-preset" style="background-color: #14b8a6; width: 24px; height: 24px; border-radius: 50%; border: 2px solid ${group.color === '#14b8a6' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#14b8a6"></button>
+        <button class="color-preset" style="background-color: #f97316; width: 24px; height: 24px; border-radius: 50%; border: 2px solid ${group.color === '#f97316' ? '#fff' : 'transparent'}; cursor: pointer;" data-color="#f97316"></button>
+        <input type="color" class="group-custom-color-picker" value="${group.color || '#475569'}" style="width: 28px; height: 28px; border: none; padding: 0; background: none; cursor: pointer;" />
+      </div>
+    `;
+
+    colorGroup.querySelectorAll(".color-preset").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const color = btn.dataset.color;
+        this.onGroupUpdate(group.id, { color });
+      });
+    });
+
+    const customColorPicker = colorGroup.querySelector(".group-custom-color-picker");
+    customColorPicker.addEventListener("change", (e) => {
+      const color = e.target.value;
+      this.onGroupUpdate(group.id, { color });
+    });
+
+    editorEl.appendChild(colorGroup);
+
+    // Delete Group Button
+    const deleteGroupBtn = document.createElement("button");
+    deleteGroupBtn.className = "btn btn-danger-outline btn-full";
+    deleteGroupBtn.style.marginTop = "20px";
+    deleteGroupBtn.innerHTML = `<i data-lucide="trash-2"></i> Eliminar Grupo`;
+    deleteGroupBtn.addEventListener("click", () => {
+      this.onGroupDelete(group.id);
+    });
+    editorEl.appendChild(deleteGroupBtn);
+
+    this.container.appendChild(editorEl);
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  renderBatchEditor(selectedSet, tables, groups) {
+    const count = selectedSet.size;
+    const card = document.createElement("div");
+    card.className = "batch-editor-panel";
+    card.innerHTML = `
+      <div class="batch-header">
+        <i data-lucide="layers"></i>
+        <h3>Selección Múltiple</h3>
+        <span class="batch-badge">${count} tablas</span>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 20px;">
+        Acciones para las tablas seleccionadas:
+      </p>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div class="form-group">
+          <label>Asignar a Grupo</label>
+          <div style="display: flex; gap: 8px;">
+            <select id="batch-group-select" style="flex: 1;">
+              <option value="">Ninguno</option>
+              <option value="NEW_GROUP" style="font-weight: 600; color: var(--color-primary-light);">+ Nuevo Grupo...</option>
+              ${groups.map(g => `<option value="${g.id}">${g.name}</option>`).join("")}
+            </select>
+            <button id="btn-batch-group" class="btn btn-secondary btn-sm" style="padding-inline: 12px;">Aplicar</button>
+          </div>
+        </div>
+        <hr style="border: none; border-top: 1px solid var(--color-border); margin-block: 8px;" />
+        <button id="btn-batch-delete" class="btn btn-danger-outline btn-full">
+          <i data-lucide="trash-2"></i> Eliminar ${count} Tablas
+        </button>
+      </div>
+    `;
+
+    const btnGroup = card.querySelector("#btn-batch-group");
+    const groupSelect = card.querySelector("#batch-group-select");
+    btnGroup.addEventListener("click", () => {
+      const groupId = groupSelect.value || null;
+      if (this.onBatchGroup) {
+        this.onBatchGroup(Array.from(selectedSet), groupId);
+      }
+    });
+
+    const btnDelete = card.querySelector("#btn-batch-delete");
+    btnDelete.addEventListener("click", () => {
+      if (this.onBatchDelete) {
+        this.onBatchDelete(Array.from(selectedSet));
+      }
+    });
+
+    this.container.appendChild(card);
+    if (window.lucide) window.lucide.createIcons();
+  }
+}

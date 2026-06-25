@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="es">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<meta name="description" content="Diseñador de diagramas de bases de datos interactivo y local. Crea tablas, relaciones y exporta a SQL." />
+		<title>Local ERD Designer</title>
+		<!-- Google Fonts: Outfit & Inter -->
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+		<!-- Lucide Icons (lightweight alternative for modern icons) -->
+		<script src="https://unpkg.com/lucide@latest"></script>
+		<!-- html2canvas (CDN for exporting canvas to PNG) -->
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+		<!-- Custom Stylesheet -->
+		<link rel="stylesheet" href="styles.css" />
+	</head>
+	<body>
+		<div class="app-container">
+			<!-- Sidebar / Editor Panel -->
+			<aside class="sidebar">
+				<div class="sidebar-header">
+					<div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+						<h2 class="app-logo" id="logo-back-to-dashboard" style="cursor: pointer;" title="Volver a Mis Proyectos">
+							<i data-lucide="layout-dashboard" style="width: 18px; height: 18px; color: var(--color-primary); margin-right: 4px;"></i>
+							ERD <span>Designer</span>
+						</h2>
+					</div>
+				</div>
+
+				<!-- General Actions Panel -->
+				<div class="control-panel" style="display: flex; flex-direction: column; gap: 8px;">
+					<button id="btn-add-table" class="btn btn-primary btn-full"><i data-lucide="plus"></i> Nueva Tabla</button>
+					<button id="btn-add-group" class="btn btn-secondary btn-full"><i data-lucide="folder-plus"></i> Nuevo Grupo</button>
+				</div>
+
+				<!-- Diagram Tables List (Collapsible Accordion) -->
+				<div id="tables-list-container" class="tables-list-container">
+					<!-- Dynamically populated tables accordion -->
+				</div>
+
+				<!-- Quick stats/storage info -->
+				<div class="sidebar-footer">
+					<div class="storage-info"><i data-lucide="save"></i> Auto-guardado activo</div>
+				</div>
+			</aside>
+
+			<!-- Main Workspace -->
+			<main class="workspace">
+				<!-- Toolbar -->
+				<header class="toolbar" style="padding-block: 20px">
+					<div class="toolbar-left">
+						<h1 id="project-title">Mi Diagrama Local</h1>
+						<button id="btn-rename-project" class="btn-icon btn-toolbar" title="Cambiar nombre del proyecto"><i data-lucide="pen"></i></button>
+
+						<!-- WebSocket collaboration status -->
+						<div id="collab-status" class="collab-status-container">
+							<span class="collab-badge status-disconnected">
+								<span class="status-dot"></span>
+								<span class="status-text" id="collab-status-text">Modo Local</span>
+							</span>
+							<span id="collab-link-container" class="collab-link-container hidden">
+								<span class="share-label">Compartir:</span>
+								<input type="text" id="share-link-input" readonly value="" />
+								<button id="btn-copy-share" class="btn-icon" title="Copiar enlace"><i data-lucide="copy"></i></button>
+							</span>
+						</div>
+
+						<!-- Active Collab Users List -->
+						<div id="active-users-list" class="active-users-list hidden">
+							<!-- Dynamic user avatars -->
+						</div>
+					</div>
+					<div class="toolbar-right">
+						<button id="btn-export-image" class="btn btn-toolbar" title="Exportar como Imagen"><i data-lucide="image"></i> Exportar Imagen</button>
+						<button id="btn-save-project" class="btn btn-toolbar" title="Guardar Proyecto con Nombre"><i data-lucide="save"></i> Guardar</button>
+						<button id="btn-export-sql" class="btn btn-toolbar" title="Exportar a SQL DDL"><i data-lucide="file-code"></i> Exportar SQL</button>
+						<button id="btn-export-json" class="btn btn-toolbar" title="Descargar como JSON"><i data-lucide="download"></i> Exportar JSON</button>
+						<button id="btn-import-json-trigger" class="btn btn-toolbar" title="Cargar archivo JSON"><i data-lucide="upload"></i> Cargar JSON</button>
+						<button id="btn-import-sql-modal-trigger" class="btn btn-toolbar" title="Importar código SQL"><i data-lucide="database"></i> Importar SQL</button>
+						<input type="file" id="input-import-json" accept=".json" style="display: none" />
+						<button id="btn-clear-all" class="btn btn-toolbar btn-danger-outline" title="Limpiar todo el diagrama"><i data-lucide="trash-2"></i> Limpiar Todo</button>
+					</div>
+				</header>
+
+				<!-- Canvas Container -->
+				<div id="canvas-container" class="canvas-container">
+					<!-- Interactive Grid Canvas -->
+					<div id="erd-canvas" class="erd-canvas">
+						<!-- Connection SVG Overlay -->
+						<svg id="erd-connections-svg" class="connections-svg">
+							<defs>
+								<marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+									<path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-primary-light)" />
+								</marker>
+								<marker id="many" viewBox="0 0 12 12" refX="8" refY="6" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+									<path d="M 0 2 L 8 6 L 0 10 M 8 6 L 12 6" fill="none" stroke="var(--color-primary-light)" stroke-width="1.5" />
+								</marker>
+								<marker id="one" viewBox="0 0 12 12" refX="8" refY="6" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+									<path d="M 4 2 L 4 10 M 8 2 L 8 10 M 0 6 L 12 6" fill="none" stroke="var(--color-primary-light)" stroke-width="1.5" />
+								</marker>
+							</defs>
+							<!-- Dynamic paths generated by JS -->
+						</svg>
+
+						<!-- Groups are rendered here (behind connections) -->
+						<div id="erd-groups-container" class="groups-container"></div>
+
+						<!-- Tables are rendered here -->
+						<div id="erd-tables-container" class="tables-container"></div>
+
+						<!-- Cursors are rendered here -->
+						<div id="erd-cursors-container" class="cursors-container"></div>
+					</div>
+				</div>
+
+				<!-- Floating Bottom Toolbar -->
+				<div class="bottom-toolbar">
+					<!-- Floating Search Container -->
+					<div id="search-container" class="search-floating hidden">
+						<i data-lucide="search" class="search-icon-inside"></i>
+						<input type="text" id="search-tables-input" placeholder="Buscar tabla por nombre..." />
+						<button id="btn-clear-search" class="btn-icon" title="Limpiar búsqueda"><i data-lucide="x"></i></button>
+					</div>
+
+					<div class="toolbar-controls">
+						<button id="btn-search-toggle" class="btn-icon-toolbar" title="Buscar Tabla"><i data-lucide="search"></i></button>
+						<button id="btn-zoom-fit" class="btn-icon-toolbar" title="Ajustar al Lienzo"><i data-lucide="maximize"></i></button>
+						<button id="btn-zoom-out" class="btn-icon-toolbar" title="Alejar"><i data-lucide="zoom-out"></i></button>
+						<span id="zoom-level" class="zoom-text">100%</span>
+						<button id="btn-zoom-in" class="btn-icon-toolbar" title="Acercar"><i data-lucide="zoom-in"></i></button>
+						<button id="btn-auto-layout" class="btn-icon-toolbar" title="Organizar Tablas"><i data-lucide="layout-grid"></i></button>
+						<button id="btn-undo" class="btn-icon-toolbar" title="Deshacer"><i data-lucide="undo-2"></i></button>
+						<button id="btn-redo" class="btn-icon-toolbar" title="Rehacer"><i data-lucide="redo-2"></i></button>
+					</div>
+				</div>
+			</main>
+		</div>
+
+		<!-- Image Export Modal -->
+		<div id="image-modal" class="modal hidden">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2>Exportar Imagen de Canvas</h2>
+					<button id="btn-close-image-modal" class="btn-icon"><i data-lucide="x"></i></button>
+				</div>
+				<div class="modal-body">
+					<div class="dialect-selector">
+						<label>Formato de Imagen:</label>
+						<div class="radio-group">
+							<input type="radio" id="format-png" name="image-format" value="png" checked />
+							<label for="format-png">PNG</label>
+
+							<input type="radio" id="format-jpg" name="image-format" value="jpg" />
+							<label for="format-jpg">JPG</label>
+
+							<input type="radio" id="format-svg" name="image-format" value="svg" />
+							<label for="format-svg">SVG</label>
+						</div>
+					</div>
+					<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
+						<button id="btn-download-image" class="btn btn-primary"><i data-lucide="download"></i> Descargar</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- SQL Export Modal -->
+		<div id="sql-modal" class="modal hidden">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2>Exportar Código SQL DDL</h2>
+					<button id="btn-close-sql-modal" class="btn-icon"><i data-lucide="x"></i></button>
+				</div>
+				<div class="modal-body">
+					<div class="dialect-selector">
+						<label>Dialecto SQL:</label>
+						<div class="radio-group">
+							<input type="radio" id="dialect-postgres" name="sql-dialect" value="postgresql" checked />
+							<label for="dialect-postgres">PostgreSQL</label>
+
+							<input type="radio" id="dialect-mysql" name="sql-dialect" value="mysql" />
+							<label for="dialect-mysql">MySQL</label>
+
+							<input type="radio" id="dialect-sqlite" name="sql-dialect" value="sqlite" />
+							<label for="dialect-sqlite">SQLite</label>
+						</div>
+					</div>
+					<div class="code-container">
+						<pre><code id="sql-code-block">-- SQL generated code will appear here</code></pre>
+						<button id="btn-copy-sql" class="btn btn-secondary btn-copy" title="Copiar al portapapeles"><i data-lucide="copy"></i> Copiar</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Custom Confirm Modal -->
+		<div id="custom-confirm-modal" class="modal hidden">
+			<div class="modal-content" style="max-width: 400px; text-align: center;">
+				<div class="modal-header" style="justify-content: center; border-bottom: none; padding-bottom: 0;">
+					<h2 id="confirm-modal-title">¿Estás seguro?</h2>
+				</div>
+				<div class="modal-body">
+					<p id="confirm-modal-message" style="margin-bottom: 20px; color: var(--color-text-dim);">Esta acción no se puede deshacer.</p>
+					<div style="display: flex; justify-content: center; gap: 10px;">
+						<button id="btn-confirm-cancel" class="btn btn-secondary">Cancelar</button>
+						<button id="btn-confirm-ok" class="btn btn-primary">Aceptar</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Custom Prompt Modal -->
+		<div id="custom-prompt-modal" class="modal hidden">
+			<div class="modal-content" style="max-width: 400px;">
+				<div class="modal-header">
+					<h2 id="prompt-modal-title">Ingresa el valor</h2>
+					<button id="btn-close-prompt" class="btn-icon"><i data-lucide="x"></i></button>
+				</div>
+				<div class="modal-body">
+					<p id="prompt-modal-message" style="margin-bottom: 10px; font-size: 0.9rem; color: var(--color-text-dim);"></p>
+					<input type="text" id="prompt-modal-input" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); margin-bottom: 15px;">
+					<div style="display: flex; justify-content: flex-end; gap: 10px;">
+						<button id="btn-prompt-cancel" class="btn btn-secondary">Cancelar</button>
+						<button id="btn-prompt-ok" class="btn btn-primary">Aceptar</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- SQL Import Modal -->
+		<div id="import-sql-modal" class="modal hidden">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2>Importar SQL (Ingeniería Inversa)</h2>
+					<button id="btn-close-import-sql-modal" class="btn-icon"><i data-lucide="x"></i></button>
+				</div>
+				<div class="modal-body">
+					<p style="font-size: 0.85rem; color: var(--color-text-dim); margin-bottom: 10px;">
+						Pega el código DDL (CREATE TABLE...) generado por phpMyAdmin, DBeaver u otra base de datos.
+					</p>
+					<textarea id="import-sql-textarea" class="sql-textarea" placeholder="CREATE TABLE mi_tabla (\n  id INT PRIMARY KEY,\n  nombre VARCHAR(255)\n);" style="width: 100%; height: 200px; background-color: var(--color-bg-tertiary); color: var(--color-text-main); font-family: monospace; padding: 10px; border: 1px solid var(--color-border); border-radius: 6px; resize: vertical;"></textarea>
+					<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px;">
+						<button id="btn-execute-import-sql" class="btn btn-primary"><i data-lucide="play"></i> Importar y Generar</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Project Dashboard (Shown when no project in URL) -->
+		<div id="project-dashboard" class="dashboard-container hidden">
+			<div class="dashboard-header">
+				<h1 class="app-logo"><i data-lucide="database" style="color: var(--color-primary);"></i> ERD <span>Collaborative</span></h1>
+				<button id="btn-dashboard-new-project" class="btn btn-primary"><i data-lucide="plus"></i> Nuevo Proyecto</button>
+			</div>
+			<div class="dashboard-content">
+				<h2 class="dashboard-title">Mis Proyectos</h2>
+				<div id="projects-grid" class="projects-grid">
+					<!-- Project cards will be loaded here -->
+				</div>
+			</div>
+		</div>
+
+		<!-- User Identity Modal -->
+		<div id="user-identity-modal" class="modal hidden">
+			<div class="modal-content" style="max-width: 400px;">
+				<div class="modal-header">
+					<h2>Configura tu Perfil Colaborativo</h2>
+				</div>
+				<div class="modal-body">
+					<p style="font-size: 0.9rem; color: var(--color-text-muted); margin-bottom: 15px;">
+						Elige cómo te verán otros colaboradores en este diagrama.
+					</p>
+					<div style="display: flex; flex-direction: column; gap: 15px;">
+						<div>
+							<label style="display: block; font-size: 0.85rem; margin-bottom: 6px; color: var(--color-text-muted);">Nombre de Usuario:</label>
+							<input type="text" id="user-name-input" placeholder="Tu nombre..." style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-app); color: var(--color-text-main); font-weight: 500;" />
+						</div>
+						<div>
+							<label style="display: block; font-size: 0.85rem; margin-bottom: 8px; color: var(--color-text-muted);">Color de Puntero:</label>
+							<div class="color-palette-selector" style="display: flex; gap: 10px; flex-wrap: wrap;">
+								<button type="button" class="color-dot selected" data-color="#6366f1" style="background-color: #6366f1;"></button>
+								<button type="button" class="color-dot" data-color="#10b981" style="background-color: #10b981;"></button>
+								<button type="button" class="color-dot" data-color="#ef4444" style="background-color: #ef4444;"></button>
+								<button type="button" class="color-dot" data-color="#f59e0b" style="background-color: #f59e0b;"></button>
+								<button type="button" class="color-dot" data-color="#ec4899" style="background-color: #ec4899;"></button>
+								<button type="button" class="color-dot" data-color="#06b6d4" style="background-color: #06b6d4;"></button>
+							</div>
+						</div>
+					</div>
+					<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px;">
+						<button id="btn-save-user-identity" class="btn btn-primary btn-full">Entrar al Diagrama</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Toast Notification Container -->
+		<div id="toast-container" class="toast-container"></div>
+
+		<!-- Main Application Script -->
+		<script type="module" src="app.js"></script>
+	</body>
+</html>

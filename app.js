@@ -1,0 +1,44 @@
+// app.js - Entry Point
+import { AppController } from './src/controllers/AppController.js';
+
+const urlParams = new URLSearchParams(window.location.search);
+const projectId = urlParams.get('project') || '';
+
+const config = {
+  projectId,
+  wsUrl: `ws://${window.location.hostname}:3000${projectId ? `/?project=${encodeURIComponent(projectId)}` : ''}`,
+  defaultState: {
+    tables: [
+      {
+        id: "tbl-users",
+        name: "usuarios",
+        x: 100,
+        y: 100,
+        groupId: null,
+        fields: [
+          { id: "f-u-1", name: "id", type: "INT", isPK: true },
+          { id: "f-u-2", name: "nombre", type: "VARCHAR(255)", isPK: false }
+        ]
+      }
+    ],
+    relationships: [],
+    groups: []
+  },
+  dom: {
+    canvasContainer: document.getElementById("canvas-container"),
+    erdCanvas: document.getElementById("erd-canvas"),
+    tablesContainer: document.getElementById("erd-tables-container"),
+    connectionsSvg: document.getElementById("erd-connections-svg"),
+    zoomText: document.getElementById("zoom-level"),
+    tablesListContainer: document.getElementById("tables-list-container"),
+    toastContainer: document.getElementById("toast-container"),
+    sqlModal: document.getElementById("sql-modal"),
+    imageModal: document.getElementById("image-modal")
+  }
+};
+
+const app = new AppController(config);
+
+document.addEventListener("DOMContentLoaded", () => {
+  app.init();
+});
