@@ -80,6 +80,59 @@ export class SidebarEditor {
 
     accordionItem.appendChild(header);
 
+    // Allow dropping fields onto the table header/accordion item
+    accordionItem.addEventListener("dragover", (e) => {
+      if (!this._dragFieldData) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = e.ctrlKey ? "copy" : "move";
+      accordionItem.classList.add("drop-target-active");
+
+      // Auto-expand table if hovered for more than 600ms
+      if (!isExpanded && !this._expandTimeout) {
+        this._expandTimeout = setTimeout(() => {
+          this.onTableSelect(table.id);
+          this._expandTimeout = null;
+        }, 600);
+      }
+    });
+
+    accordionItem.addEventListener("dragleave", (e) => {
+      if (!accordionItem.contains(e.relatedTarget)) {
+        accordionItem.classList.remove("drop-target-active");
+        if (this._expandTimeout) {
+          clearTimeout(this._expandTimeout);
+          this._expandTimeout = null;
+        }
+      }
+    });
+
+    accordionItem.addEventListener("drop", (e) => {
+      if (!this._dragFieldData) return;
+      e.preventDefault();
+      e.stopPropagation();
+      accordionItem.classList.remove("drop-target-active");
+      if (this._expandTimeout) {
+        clearTimeout(this._expandTimeout);
+        this._expandTimeout = null;
+      }
+
+      const { fieldId: draggedFieldId, sourceTableId } = this._dragFieldData;
+      const targetTableId = table.id;
+      const targetIndex = table.fields.length;
+      const isCopy = e.ctrlKey;
+
+      if (isCopy) {
+        if (this.onFieldCopy) {
+          this.onFieldCopy(sourceTableId, draggedFieldId, targetTableId, targetIndex);
+        }
+      } else {
+        if (this.onFieldMove) {
+          this.onFieldMove(sourceTableId, draggedFieldId, targetTableId, targetIndex);
+        }
+      }
+      this._dragFieldData = null;
+    });
+
     // Content
     const content = document.createElement("div");
     content.className = "table-accordion-content";
@@ -248,7 +301,7 @@ export class SidebarEditor {
   _createFieldEditorItem(tableId, field) {
     const item = document.createElement("div");
     item.className = "field-editor-item";
-    item.draggable = true;
+    item.draggable = false; // Start as false so input fields can be interacted with / text selected
     item.dataset.fieldId = field.id;
     item.dataset.tableId = tableId;
 
@@ -289,12 +342,24 @@ export class SidebarEditor {
       </div>
     `;
 
+    // Make draggable dynamic based on handle grabbing
+    const dragHandle = item.querySelector(".field-drag-handle");
+    if (dragHandle) {
+      dragHandle.addEventListener("mousedown", () => {
+        item.draggable = true;
+      });
+      dragHandle.addEventListener("mouseup", () => {
+        item.draggable = false;
+      });
+      dragHandle.addEventListener("mouseleave", () => {
+        if (!item.classList.contains("dragging")) {
+          item.draggable = false;
+        }
+      });
+    }
+
     // --- Drag & Drop events ---
     item.addEventListener("dragstart", (e) => {
-      // Only allow drag from the handle
-      if (!e.target.closest(".field-drag-handle") && e.target !== item) {
-        // Allow dragstart but we check the mousedown origin
-      }
       this._dragFieldData = { fieldId: field.id, sourceTableId: tableId };
       e.dataTransfer.effectAllowed = "copyMove";
       e.dataTransfer.setData("text/plain", field.id);
@@ -302,13 +367,14 @@ export class SidebarEditor {
     });
 
     item.addEventListener("dragend", () => {
+      item.draggable = false;
       item.classList.remove("dragging");
       this._dragFieldData = null;
       // Clean all visual indicators
       this.container.querySelectorAll(".drag-over-top, .drag-over-bottom").forEach(el => {
         el.classList.remove("drag-over-top", "drag-over-bottom");
       });
-      this.container.querySelectorAll(".fields-list.drop-target-active").forEach(el => {
+      this.container.querySelectorAll(".fields-list.drop-target-active, .table-accordion-item.drop-target-active").forEach(el => {
         el.classList.remove("drop-target-active");
       });
     });

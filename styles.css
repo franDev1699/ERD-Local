@@ -1375,9 +1375,14 @@ select option {
   display: none;
 }
 
-/* ===== Drag & Drop: Sidebar Tables ===== */
 .table-accordion-item[draggable="true"] {
   transition: border-color 0.15s, background-color 0.15s, opacity 0.2s, transform 0.15s;
+}
+
+.table-accordion-item.drop-target-active {
+  outline: 2px dashed var(--color-success-light) !important;
+  outline-offset: 2px;
+  background-color: rgba(16, 185, 129, 0.04) !important;
 }
 
 .table-accordion-item.dragging {
