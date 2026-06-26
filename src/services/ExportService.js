@@ -14,43 +14,61 @@ export class ExportService {
       return ddl + `-- No hay tablas en el diagrama.`;
     }
 
+    const q = dialect === 'sqlserver' ? (name) => `[${name}]` : (name) => name;
+
+    // Type mapping for SQL Server
+    const mapType = (fieldType, dial) => {
+      if (dial !== 'sqlserver') return fieldType;
+      const upper = fieldType.toUpperCase();
+      if (upper === 'TEXT') return 'NVARCHAR(MAX)';
+      if (upper.startsWith('VARCHAR')) return upper.replace('VARCHAR', 'NVARCHAR');
+      if (upper === 'BOOLEAN') return 'BIT';
+      if (upper === 'TIMESTAMP') return 'DATETIME2';
+      if (upper.startsWith('DECIMAL')) return upper;
+      return upper;
+    };
+
     // 1. Create Tables DDL
     state.tables.forEach(table => {
-      ddl += `CREATE TABLE ${table.name} (\n`;
+      ddl += `CREATE TABLE ${q(table.name)} (\n`;
 
       const columnDefinitions = [];
 
       table.fields.forEach(field => {
         let fieldType = field.type.toUpperCase();
-        
+
         // Postgres SERIAL shorthand for Auto Increment INT
         if (field.isAutoIncrement && dialect === 'postgresql' && fieldType.includes('INT')) {
-            fieldType = 'SERIAL';
+          fieldType = 'SERIAL';
         }
 
-        let colDef = `  ${field.name} ${fieldType}`;
+        // SQL Server type mapping
+        fieldType = mapType(fieldType, dialect);
+
+        let colDef = `  ${q(field.name)} ${fieldType}`;
 
         if (field.isPK && dialect === "sqlite") {
-            colDef += ` PRIMARY KEY`;
+          colDef += ` PRIMARY KEY`;
         }
 
         if (field.isAutoIncrement) {
-            if (dialect === 'mysql') colDef += ` AUTO_INCREMENT`;
-            if (dialect === 'sqlite') colDef += ` AUTOINCREMENT`;
+          if (dialect === 'mysql') colDef += ` AUTO_INCREMENT`;
+          if (dialect === 'sqlite') colDef += ` AUTOINCREMENT`;
+          if (dialect === 'sqlserver') colDef += ` IDENTITY(1,1)`;
         }
 
         if (field.isUnique) {
-            colDef += ` UNIQUE`;
+          colDef += ` UNIQUE`;
         }
 
         // Avoid adding NOT NULL multiple times if PK already implies it in our logic
         const needsNotNull = field.isNotNull || (field.isPK && dialect !== "sqlite");
         if (needsNotNull) {
-            colDef += ` NOT NULL`;
+          colDef += ` NOT NULL`;
         }
 
         if (field.defaultValue) {
-            colDef += ` DEFAULT ${field.defaultValue}`;
+          colDef += ` DEFAULT ${field.defaultValue}`;
         }
 
         columnDefinitions.push(colDef);
@@ -58,9 +76,13 @@ export class ExportService {
 
       // Add primary key constraints for non-sqlite dialects
       if (dialect !== "sqlite") {
-        const pks = table.fields.filter(f => f.isPK).map(f => f.name);
+        const pks = table.fields.filter(f => f.isPK).map(f => q(f.name));
         if (pks.length > 0) {
-          columnDefinitions.push(`  PRIMARY KEY (${pks.join(', ')})`);
+          if (dialect === 'sqlserver') {
+            columnDefinitions.push(`  CONSTRAINT [PK_${table.name}] PRIMARY KEY (${pks.join(', ')})`);
+          } else {
+            columnDefinitions.push(`  PRIMARY KEY (${pks.join(', ')})`);
+          }
         }
       }
 
@@ -81,10 +103,12 @@ export class ExportService {
       }
 
       ddl += columnDefinitions.join(",\n");
-      ddl += `\n);\n\n`;
+      ddl += `\n);\n`;
+      if (dialect === 'sqlserver') ddl += `GO\n`;
+      ddl += `\n`;
     });
 
-    // 2. ALTER TABLE commands for Foreign Keys (PostgreSQL, MySQL)
+    // 2. ALTER TABLE commands for Foreign Keys (PostgreSQL, MySQL, SQL Server)
     if (dialect !== "sqlite") {
       let fkDdl = "";
       state.relationships.forEach(rel => {
@@ -97,9 +121,11 @@ export class ExportService {
 
           if (sourceField && targetField) {
             const constraintName = `fk_${sourceTable.name}_${sourceField.name}`;
-            fkDdl += `ALTER TABLE ${sourceTable.name}\n`;
-            fkDdl += `  ADD CONSTRAINT ${constraintName}\n`;
-            fkDdl += `  FOREIGN KEY (${sourceField.name}) REFERENCES ${targetTable.name}(${targetField.name});\n\n`;
+            fkDdl += `ALTER TABLE ${q(sourceTable.name)}\n`;
+            fkDdl += `  ADD CONSTRAINT ${q(constraintName)}\n`;
+            fkDdl += `  FOREIGN KEY (${q(sourceField.name)}) REFERENCES ${q(targetTable.name)}(${q(targetField.name)});\n`;
+            if (dialect === 'sqlserver') fkDdl += `GO\n`;
+            fkDdl += `\n`;
           }
         }
       });

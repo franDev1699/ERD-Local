@@ -49,6 +49,14 @@ export class UIManager {
     if (modalElement) modalElement.classList.add("hidden");
   }
 
+  openAiModal(modalElement) {
+    if (modalElement) modalElement.classList.remove("hidden");
+  }
+
+  closeAiModal(modalElement) {
+    if (modalElement) modalElement.classList.add("hidden");
+  }
+
   toggleSearch(container) {
     container.classList.toggle("hidden");
     if (!container.classList.contains("hidden")) {
@@ -150,5 +158,13 @@ export class UIManager {
       input.focus();
       input.select();
     });
+  }
+
+  openMarkdownModal(modalElement) {
+    if (modalElement) modalElement.classList.remove("hidden");
+  }
+
+  closeMarkdownModal(modalElement) {
+    if (modalElement) modalElement.classList.add("hidden");
   }
 }

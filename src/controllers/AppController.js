@@ -1,11 +1,11 @@
 // src/controllers/AppController.js
-
 import { StateManager } from '../core/StateManager.js';
 import { HistoryManager } from '../core/HistoryManager.js';
 import { StorageService } from '../services/StorageService.js';
 import { WebSocketService } from '../services/WebSocketService.js';
 import { ExportService } from '../services/ExportService.js';
 import { ImportService } from '../services/ImportService.js';
+import { AiService } from '../services/AiService.js';
 import { Renderer } from '../ui/Renderer.js';
 import { CanvasManager } from '../ui/CanvasManager.js';
 import { SidebarEditor } from '../ui/SidebarEditor.js';
@@ -44,6 +44,8 @@ export class AppController {
       onFieldAdd: (tableId) => this.addField(tableId),
       onFieldUpdate: (tableId, fieldId, updates) => this.updateField(tableId, fieldId, updates),
       onFieldDelete: (tableId, fieldId) => this.deleteField(tableId, fieldId),
+      onFieldMove: (sourceTableId, fieldId, targetTableId, targetIndex) => this.moveField(sourceTableId, fieldId, targetTableId, targetIndex),
+      onFieldCopy: (sourceTableId, fieldId, targetTableId, targetIndex) => this.copyField(sourceTableId, fieldId, targetTableId, targetIndex),
       onGroupUpdate: (groupId, updates) => this.updateGroup(groupId, updates),
       onGroupDelete: (groupId) => this.deleteGroup(groupId),
       onBatchDelete: (ids) => this.deleteTables(ids),
@@ -126,6 +128,7 @@ export class AppController {
     this.interactionController.init();
     this.setupGlobalEventListeners();
     this.canvasManager.centerCanvas();
+    this.setupAiModal();
   }
 
   handleStateChange(newState, isRemote = false) {
@@ -568,6 +571,28 @@ export class AppController {
     this.uiManager.showToast("Campo eliminado.", "success");
   }
 
+  moveField(sourceTableId, fieldId, targetTableId, targetIndex) {
+    this.history.push(this.stateManager.getState());
+    this.stateManager.moveField(sourceTableId, fieldId, targetTableId, targetIndex);
+
+    if (sourceTableId !== targetTableId) {
+      const state = this.stateManager.getState();
+      const targetTable = state.tables.find(t => t.id === targetTableId);
+      const targetName = targetTable ? targetTable.name : "otra tabla";
+      this.uiManager.showToast(`Campo movido a "${targetName}".`, "success");
+    }
+  }
+
+  copyField(sourceTableId, fieldId, targetTableId, targetIndex) {
+    this.history.push(this.stateManager.getState());
+    this.stateManager.copyField(sourceTableId, fieldId, targetTableId, targetIndex);
+
+    const state = this.stateManager.getState();
+    const targetTable = state.tables.find(t => t.id === targetTableId);
+    const targetName = targetTable ? targetTable.name : "tabla";
+    this.uiManager.showToast(`Campo copiado a "${targetName}".`, "success");
+  }
+
   // --- Relationship Operations ---
   addRelationship(fromTable, fromField, toTable, toField) {
     const state = this.stateManager.getState();
@@ -813,6 +838,80 @@ export class AppController {
           this.uiManager.showToast("Error al exportar la imagen.", "error");
         }
         this.uiManager.closeImageModal();
+      });
+    }
+
+    // Generar Documentación Markdown con IA
+    const btnExportMarkdownAi = document.getElementById("btn-export-markdown-ai");
+    const markdownModal = document.getElementById("markdown-modal");
+    const btnCloseMarkdownModal = document.getElementById("btn-close-markdown-modal");
+    const markdownTextArea = document.getElementById("markdown-text-area");
+    const btnCopyMarkdown = document.getElementById("btn-copy-markdown");
+    const btnDownloadMarkdown = document.getElementById("btn-download-markdown");
+
+    if (btnExportMarkdownAi) {
+      btnExportMarkdownAi.addEventListener("click", async () => {
+        const state = this.stateManager.getState();
+        if (state.tables.length === 0) {
+          this.uiManager.showToast("El diagrama está vacío. Crea tablas antes de documentar.", "error");
+          return;
+        }
+
+        // Cargar config y validar
+        const config = AiService.loadConfig();
+        if (config.provider !== 'ollama' && !config.apiKey) {
+          this.uiManager.showToast("Configura primero tu clave de API de IA.", "error");
+          const modalAi = document.getElementById("ai-modal");
+          if (modalAi) {
+            this.uiManager.openAiModal(modalAi);
+            const tabConfig = document.getElementById("tab-ai-config");
+            if (tabConfig) tabConfig.click();
+          }
+          return;
+        }
+
+        this.uiManager.showToast("Generando documentación con IA...", "info");
+        btnExportMarkdownAi.disabled = true;
+        const originalText = btnExportMarkdownAi.innerHTML;
+        btnExportMarkdownAi.innerHTML = `<span class="spinner-loader"></span> Documentando...`;
+
+        try {
+          const markdownDoc = await AiService.document(state);
+          if (markdownTextArea) {
+            markdownTextArea.value = markdownDoc;
+          }
+          this.uiManager.openMarkdownModal(markdownModal);
+          this.uiManager.showToast("Documentación generada correctamente.", "success");
+        } catch (err) {
+          console.error("Error al generar documentación:", err);
+          this.uiManager.showToast(`Error: ${err.message}`, "error");
+        } finally {
+          btnExportMarkdownAi.disabled = false;
+          btnExportMarkdownAi.innerHTML = originalText;
+        }
+      });
+    }
+
+    if (btnCloseMarkdownModal && markdownModal) {
+      btnCloseMarkdownModal.addEventListener("click", () => {
+        this.uiManager.closeMarkdownModal(markdownModal);
+      });
+    }
+
+    if (btnCopyMarkdown && markdownTextArea) {
+      btnCopyMarkdown.addEventListener("click", () => {
+        navigator.clipboard.writeText(markdownTextArea.value)
+          .then(() => this.uiManager.showToast("Documentación copiada al portapapeles.", "success"))
+          .catch(() => this.uiManager.showToast("Error al copiar al portapapeles.", "error"));
+      });
+    }
+
+    if (btnDownloadMarkdown && markdownTextArea) {
+      btnDownloadMarkdown.addEventListener("click", () => {
+        const defaultName = `documentacion_${this.projectId || 'db'}_${new Date().toLocaleDateString().replace(/\//g, "-")}.md`;
+        const dataStr = "data:text/markdown;charset=utf-8," + encodeURIComponent(markdownTextArea.value);
+        ExportService._downloadFile(dataStr, defaultName);
+        this.uiManager.showToast("Archivo Markdown descargado.", "success");
       });
     }
 
@@ -1441,5 +1540,299 @@ export class AppController {
     
     const label = cursorEl.querySelector(".user-cursor-label");
     if (label) label.textContent = payload.username;
+  }
+
+  setupAiModal() {
+    const modal = document.getElementById("ai-modal");
+    const btnTrigger = document.getElementById("btn-ai-modal-trigger");
+    const btnClose = document.getElementById("btn-close-ai-modal");
+    
+    if (!modal) return;
+
+    // Tabs
+    const tabAssistant = document.getElementById("tab-ai-assistant");
+    const tabConfig = document.getElementById("tab-ai-config");
+    const viewAssistant = document.getElementById("ai-assistant-view");
+    const viewConfig = document.getElementById("ai-config-view");
+
+    // Config Fields
+    const selectProvider = document.getElementById("ai-provider");
+    const inputModel = document.getElementById("ai-model");
+    const inputApiKey = document.getElementById("ai-apikey");
+    const inputApiUrl = document.getElementById("ai-apiurl");
+    const btnSaveConfig = document.getElementById("btn-save-ai-config");
+
+    // Assistant Fields
+    const textareaPrompt = document.getElementById("ai-prompt");
+    const btnGenerate = document.getElementById("btn-ai-generate");
+    const statusLog = document.getElementById("ai-status-log");
+    const selectMode = document.getElementById("ai-generation-mode");
+
+    // Open/Close
+    if (btnTrigger) {
+      btnTrigger.addEventListener("click", () => {
+        // Cargar config actual al abrir
+        const config = AiService.loadConfig();
+        if (selectProvider) selectProvider.value = config.provider;
+        if (inputModel) inputModel.value = config.model;
+        if (inputApiKey) inputApiKey.value = config.apiKey;
+        if (inputApiUrl) inputApiUrl.value = config.apiUrl;
+
+        // Mostrar/ocultar inputs según el proveedor
+        toggleProviderFields(config.provider);
+
+        // Resetear tab
+        switchTab("assistant");
+
+        this.uiManager.openAiModal(modal);
+      });
+    }
+
+    if (btnClose) {
+      btnClose.addEventListener("click", () => {
+        this.uiManager.closeAiModal(modal);
+      });
+    }
+
+    // Toggle provider fields helper
+    function toggleProviderFields(provider) {
+      const apiKeyGroup = document.getElementById("ai-apikey-group");
+      const apiKeyLabel = apiKeyGroup ? apiKeyGroup.querySelector("label") : null;
+      const apiKeyInput = document.getElementById("ai-apikey");
+      const apiUrlGroup = document.getElementById("ai-apiurl-group");
+      
+      if (provider === 'ollama') {
+        if (apiKeyGroup) apiKeyGroup.classList.remove("hidden");
+        if (apiKeyLabel) apiKeyLabel.textContent = "API Key / Token (Opcional):";
+        if (apiKeyInput) apiKeyInput.placeholder = "Token de autorización (opcional)...";
+        if (apiUrlGroup) apiUrlGroup.classList.remove("hidden");
+      } else {
+        if (apiKeyGroup) apiKeyGroup.classList.remove("hidden");
+        if (apiKeyLabel) apiKeyLabel.textContent = "API Key:";
+        if (apiKeyInput) apiKeyInput.placeholder = "Ingresa tu clave de API...";
+        if (apiUrlGroup) apiUrlGroup.classList.add("hidden");
+      }
+    }
+
+    if (selectProvider) {
+      selectProvider.addEventListener("change", (e) => {
+        toggleProviderFields(e.target.value);
+        // Sugerir modelos comunes al cambiar
+        if (e.target.value === 'gemini') {
+          inputModel.value = 'gemini-1.5-flash';
+        } else if (e.target.value === 'openai') {
+          inputModel.value = 'gpt-4o-mini';
+        } else if (e.target.value === 'ollama') {
+          inputModel.value = 'qwen2.5-coder';
+        }
+      });
+    }
+
+    // Tabs switching helper
+    function switchTab(tab) {
+      if (tab === "assistant") {
+        if (tabAssistant) tabAssistant.classList.add("active");
+        if (tabConfig) tabConfig.classList.remove("active");
+        if (viewAssistant) viewAssistant.classList.remove("hidden");
+        if (viewConfig) viewConfig.classList.add("hidden");
+      } else {
+        if (tabAssistant) tabAssistant.classList.remove("active");
+        if (tabConfig) tabConfig.classList.add("active");
+        if (viewAssistant) viewAssistant.classList.add("hidden");
+        if (viewConfig) viewConfig.classList.remove("hidden");
+      }
+    }
+
+    if (tabAssistant && tabConfig) {
+      tabAssistant.addEventListener("click", () => switchTab("assistant"));
+      tabConfig.addEventListener("click", () => switchTab("config"));
+    }
+
+    // Save Config
+    if (btnSaveConfig) {
+      btnSaveConfig.addEventListener("click", () => {
+        const config = {
+          provider: selectProvider.value,
+          model: inputModel.value.trim(),
+          apiKey: inputApiKey.value.trim(),
+          apiUrl: inputApiUrl.value.trim()
+        };
+
+        if (config.provider !== 'ollama' && !config.apiKey) {
+          this.uiManager.showToast("La clave API es requerida para este proveedor.", "error");
+          return;
+        }
+
+        AiService.saveConfig(config);
+        this.uiManager.showToast("Configuración de IA guardada.", "success");
+        switchTab("assistant");
+      });
+    }
+
+    // Chips de prompts rápidos
+    document.querySelectorAll(".quick-prompt-chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        textareaPrompt.value = chip.dataset.prompt;
+        textareaPrompt.focus();
+      });
+    });
+
+    // Acción principal: Generar
+    if (btnGenerate) {
+      btnGenerate.addEventListener("click", async () => {
+        const prompt = textareaPrompt.value.trim();
+        if (!prompt) {
+          this.uiManager.showToast("Por favor describe lo que necesitas.", "error");
+          return;
+        }
+
+        // Cargar config y validar
+        const config = AiService.loadConfig();
+        if (config.provider !== 'ollama' && !config.apiKey) {
+          this.uiManager.showToast("Configura primero tu clave API en la pestaña de Configuración.", "error");
+          switchTab("config");
+          return;
+        }
+
+        // Bloquear UI y mostrar spinner
+        btnGenerate.disabled = true;
+        btnGenerate.innerHTML = `<span class="spinner-loader"></span> Generando...`;
+        if (statusLog) {
+          statusLog.className = "ai-status-log info";
+          statusLog.innerHTML = `<i data-lucide="loader" class="animate-spin" style="width: 14px; height: 14px; margin-right: 6px;"></i> Conectando con ${config.provider}...`;
+          if (window.lucide) window.lucide.createIcons();
+        }
+
+        try {
+          const mode = selectMode ? selectMode.value : "replace";
+          const currentState = this.stateManager.getState();
+          
+          // Realizar llamada al proxy
+          const result = await AiService.generate(prompt, mode === 'append' ? currentState : null);
+
+          if (!result || !result.tables || !Array.isArray(result.tables)) {
+            throw new Error("El JSON retornado por la IA no tiene el formato correcto.");
+          }
+
+          // Guardar estado actual para deshacer
+          this.history.push(JSON.parse(JSON.stringify(currentState)));
+
+          if (mode === 'replace') {
+            // Reemplazar todo el estado
+            this.stateManager.setState({
+              tables: result.tables,
+              relationships: result.relationships || [],
+              groups: result.groups || []
+            });
+            this.uiManager.showToast("Diagrama generado por IA con éxito.", "success");
+          } else {
+            // Combinar estados (modo append)
+            const currentTables = [...currentState.tables];
+            const currentRelationships = [...currentState.relationships];
+            const currentGroups = [...(currentState.groups || [])];
+
+            // Evitar duplicaciones de IDs
+            const tableIdMap = {};
+            const fieldIdMap = {};
+
+            result.tables.forEach(newTable => {
+              const originalId = newTable.id;
+              // Si ya existe una tabla con ese ID o ese nombre, generar nuevo ID
+              const colisionId = currentTables.some(t => t.id === newTable.id);
+              const colisionName = currentTables.some(t => t.name.toLowerCase() === newTable.name.toLowerCase());
+              
+              if (colisionId || colisionName) {
+                newTable.id = `tbl-ai-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                if (colisionName) {
+                  newTable.name = `${newTable.name}_ai`;
+                }
+              }
+              tableIdMap[originalId] = newTable.id;
+
+              // Mapear campos
+              newTable.fields.forEach(field => {
+                const origFieldId = field.id;
+                field.id = `f-ai-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+                fieldIdMap[origFieldId] = field.id;
+              });
+
+              currentTables.push(newTable);
+            });
+
+            // Combinar grupos
+            if (result.groups && Array.isArray(result.groups)) {
+              result.groups.forEach(newGroup => {
+                const originalGroupId = newGroup.id;
+                newGroup.id = `group-ai-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                
+                // Actualizar tablas asociadas a este grupo
+                result.tables.forEach(t => {
+                  if (t.groupId === originalGroupId) {
+                    t.groupId = newGroup.id;
+                  }
+                });
+
+                currentGroups.push(newGroup);
+              });
+            }
+
+            // Combinar relaciones actualizando referencias a los nuevos IDs mapeados
+            if (result.relationships && Array.isArray(result.relationships)) {
+              result.relationships.forEach(rel => {
+                const mappedFromTable = tableIdMap[rel.fromTable] || rel.fromTable;
+                const mappedToTable = tableIdMap[rel.toTable] || rel.toTable;
+                const mappedFromField = fieldIdMap[rel.fromField] || rel.fromField;
+                const mappedToField = fieldIdMap[rel.toField] || rel.toField;
+
+                // Agregar relación si ambas tablas existen en el lienzo
+                const fromExists = currentTables.some(t => t.id === mappedFromTable);
+                const toExists = currentTables.some(t => t.id === mappedToTable);
+
+                if (fromExists && toExists) {
+                  currentRelationships.push({
+                    id: `rel-ai-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                    fromTable: mappedFromTable,
+                    fromField: mappedFromField,
+                    toTable: mappedToTable,
+                    toField: mappedToField
+                  });
+                }
+              });
+            }
+
+            this.stateManager.setState({
+              tables: currentTables,
+              relationships: currentRelationships,
+              groups: currentGroups
+            });
+            this.uiManager.showToast(`IA agregó ${result.tables.length} tablas y ${result.relationships?.length || 0} relaciones.`, "success");
+          }
+
+          // Ejecutar autoLayout para acomodar todo limpiamente
+          this.autoLayout();
+
+          // Cerrar modal
+          textareaPrompt.value = "";
+          if (statusLog) {
+            statusLog.className = "ai-status-log hidden";
+            statusLog.innerHTML = "";
+          }
+          this.uiManager.closeAiModal(modal);
+
+        } catch (err) {
+          console.error("Error al generar diagrama con IA:", err);
+          if (statusLog) {
+            statusLog.className = "ai-status-log error";
+            statusLog.innerHTML = `<i data-lucide="alert-circle" style="width: 14px; height: 14px; margin-right: 6px;"></i> Error: ${err.message}`;
+            if (window.lucide) window.lucide.createIcons();
+          }
+          this.uiManager.showToast("La generación falló. Verifica el log en el modal.", "error");
+        } finally {
+          btnGenerate.disabled = false;
+          btnGenerate.innerHTML = `<i data-lucide="sparkles" style="width: 14px; height: 14px; margin-right: 6px;"></i> Generar Diagrama con IA`;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
   }
 }

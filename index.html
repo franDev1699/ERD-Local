@@ -73,8 +73,10 @@
 						</div>
 					</div>
 					<div class="toolbar-right">
+						<button id="btn-ai-modal-trigger" class="btn btn-toolbar btn-ai" title="Asistente de IA (Generar / Completar)" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%); border: 1px solid rgba(139, 92, 246, 0.4);"><i data-lucide="sparkles" style="color: #a78bfa;"></i> <span style="font-weight: 600; color: #a78bfa;">Asistente IA</span></button>
 						<button id="btn-export-image" class="btn btn-toolbar" title="Exportar como Imagen"><i data-lucide="image"></i> Exportar Imagen</button>
 						<button id="btn-save-project" class="btn btn-toolbar" title="Guardar Proyecto con Nombre"><i data-lucide="save"></i> Guardar</button>
+						<button id="btn-export-markdown-ai" class="btn btn-toolbar" title="Generar Documentación en Markdown con IA"><i data-lucide="book-open"></i> Documentar con IA</button>
 						<button id="btn-export-sql" class="btn btn-toolbar" title="Exportar a SQL DDL"><i data-lucide="file-code"></i> Exportar SQL</button>
 						<button id="btn-export-json" class="btn btn-toolbar" title="Descargar como JSON"><i data-lucide="download"></i> Exportar JSON</button>
 						<button id="btn-import-json-trigger" class="btn btn-toolbar" title="Cargar archivo JSON"><i data-lucide="upload"></i> Cargar JSON</button>
@@ -183,6 +185,9 @@
 							<input type="radio" id="dialect-mysql" name="sql-dialect" value="mysql" />
 							<label for="dialect-mysql">MySQL</label>
 
+							<input type="radio" id="dialect-sqlserver" name="sql-dialect" value="sqlserver" />
+							<label for="dialect-sqlserver">SQL Server</label>
+
 							<input type="radio" id="dialect-sqlite" name="sql-dialect" value="sqlite" />
 							<label for="dialect-sqlite">SQLite</label>
 						</div>
@@ -190,6 +195,31 @@
 					<div class="code-container">
 						<pre><code id="sql-code-block">-- SQL generated code will appear here</code></pre>
 						<button id="btn-copy-sql" class="btn btn-secondary btn-copy" title="Copiar al portapapeles"><i data-lucide="copy"></i> Copiar</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Markdown Export Modal -->
+		<div id="markdown-modal" class="modal hidden">
+			<div class="modal-content" style="width: 800px; max-width: 90%;">
+				<div class="modal-header">
+					<h2 style="display: flex; align-items: center; gap: 8px;">
+						<i data-lucide="book-open" style="color: var(--color-primary);"></i>
+						Documentación Generada con IA
+					</h2>
+					<button id="btn-close-markdown-modal" class="btn-icon"><i data-lucide="x"></i></button>
+				</div>
+				<div class="modal-body">
+					<p style="font-size: 0.85rem; color: var(--color-text-dim); margin-bottom: 5px;">
+						A continuación se presenta la documentación detallada en formato Markdown (.md). Puedes copiarla directamente o descargarla como archivo.
+					</p>
+					<div class="code-container" style="position: relative;">
+						<textarea id="markdown-text-area" class="sql-textarea" readonly style="width: 100%; height: 350px; background-color: var(--color-bg-tertiary); color: var(--color-text-main); font-family: monospace; padding: 12px; border: 1px solid var(--color-border); border-radius: 6px; resize: none; font-size: 0.85rem; line-height: 1.5;"></textarea>
+					</div>
+					<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
+						<button id="btn-copy-markdown" class="btn btn-secondary"><i data-lucide="copy"></i> Copiar Código</button>
+						<button id="btn-download-markdown" class="btn btn-primary"><i data-lucide="download"></i> Descargar .md</button>
 					</div>
 				</div>
 			</div>
@@ -292,6 +322,98 @@
 					<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px;">
 						<button id="btn-save-user-identity" class="btn btn-primary btn-full">Entrar al Diagrama</button>
 					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- AI Assistant Modal -->
+		<div id="ai-modal" class="modal hidden">
+			<div class="modal-content" style="max-width: 600px;">
+				<div class="modal-header">
+					<h2 style="display: flex; align-items: center; gap: 8px;">
+						<i data-lucide="sparkles" style="color: var(--color-primary);"></i>
+						Asistente de IA
+					</h2>
+					<button id="btn-close-ai-modal" class="btn-icon"><i data-lucide="x"></i></button>
+				</div>
+				<div class="modal-body">
+					<!-- Modal Tabs -->
+					<div class="ai-tabs" style="display: flex; border-bottom: 1px solid var(--color-border); margin-bottom: 20px;">
+						<button id="tab-ai-assistant" class="ai-tab-btn active" style="flex: 1; padding: 10px; background: none; border: none; border-bottom: 2px solid var(--color-primary); color: var(--color-text-main); font-weight: 600; cursor: pointer; text-align: center;">Asistente</button>
+						<button id="tab-ai-config" class="ai-tab-btn" style="flex: 1; padding: 10px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--color-text-muted); font-weight: 500; cursor: pointer; text-align: center;">Configuración de IA</button>
+					</div>
+
+					<!-- View 1: Assistant -->
+					<div id="ai-assistant-view" class="ai-view-pane">
+						<div style="display: flex; flex-direction: column; gap: 15px;">
+							<div>
+								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">Modo de Generación:</label>
+								<select id="ai-generation-mode" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main);">
+									<option value="replace">Reemplazar diagrama actual completo</option>
+									<option value="append" selected>Agregar tablas al diagrama actual</option>
+								</select>
+							</div>
+
+							<div>
+								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">¿Qué deseas que diseñe o agregue la IA?:</label>
+								<textarea id="ai-prompt" placeholder="Ej: Crea una tabla de usuarios y otra de perfiles con relación de 1:1, y una tabla de publicaciones..." style="width: 100%; height: 120px; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-family: inherit; resize: vertical;"></textarea>
+							</div>
+
+							<!-- Prompts rápidos -->
+							<div>
+								<label style="display: block; font-size: 0.75rem; color: var(--color-text-muted); margin-bottom: 6px;">Sugerencias rápidas:</label>
+								<div class="quick-prompts-container" style="display: flex; flex-wrap: wrap; gap: 8px;">
+									<button type="button" class="quick-prompt-chip" data-prompt="Crea un esquema de E-Commerce con usuarios, pedidos, productos, y detalles de pedidos con relaciones de 1:N." style="padding: 6px 12px; border-radius: 20px; border: 1px solid var(--color-border); background: var(--color-bg-app); color: var(--color-text-muted); font-size: 0.75rem; cursor: pointer; transition: all 0.2s;">Tienda Online</button>
+									<button type="button" class="quick-prompt-chip" data-prompt="Diseña una base de datos para una Escuela con estudiantes, cursos, profesores y asignaciones (con tabla pivote intermedia)." style="padding: 6px 12px; border-radius: 20px; border: 1px solid var(--color-border); background: var(--color-bg-app); color: var(--color-text-muted); font-size: 0.75rem; cursor: pointer; transition: all 0.2s;">Sistema Escolar</button>
+									<button type="button" class="quick-prompt-chip" data-prompt="Agrega un sistema de Roles y Permisos (roles, permisos, usuarios, y sus tablas pivote)." style="padding: 6px 12px; border-radius: 20px; border: 1px solid var(--color-border); background: var(--color-bg-app); color: var(--color-text-muted); font-size: 0.75rem; cursor: pointer; transition: all 0.2s;">Roles y Permisos</button>
+									<button type="button" class="quick-prompt-chip" data-prompt="Crea una base de datos para Blog con usuarios, posts, categorias y comentarios." style="padding: 6px 12px; border-radius: 20px; border: 1px solid var(--color-border); background: var(--color-bg-app); color: var(--color-text-muted); font-size: 0.75rem; cursor: pointer; transition: all 0.2s;">Blog / CMS</button>
+								</div>
+							</div>
+
+							<!-- Estado de carga / error -->
+							<div id="ai-status-log" class="ai-status-log hidden" style="padding: 10px; border-radius: 6px; font-size: 0.85rem; display: flex; align-items: center; gap: 8px;"></div>
+
+							<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
+								<button id="btn-ai-generate" class="btn btn-primary btn-full" style="background: linear-gradient(135deg, var(--color-primary) 0%, #8b5cf6 100%); border: none;">
+									<i data-lucide="sparkles"></i> Generar con IA
+								</button>
+							</div>
+						</div>
+					</div>
+
+					<!-- View 2: Config -->
+					<div id="ai-config-view" class="ai-view-pane hidden">
+						<div style="display: flex; flex-direction: column; gap: 15px;">
+							<div>
+								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">Proveedor de IA:</label>
+								<select id="ai-provider" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main);">
+									<option value="gemini">Gemini API (Recomendado)</option>
+									<option value="openai">OpenAI API</option>
+									<option value="ollama">Ollama (IA Local)</option>
+								</select>
+							</div>
+
+							<div id="ai-model-group">
+								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">Modelo:</label>
+								<input type="text" id="ai-model" placeholder="ej: gemini-1.5-flash, gpt-4o-mini, qwen2.5-coder" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main);" />
+							</div>
+
+							<div id="ai-apikey-group">
+								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">API Key:</label>
+								<input type="password" id="ai-apikey" placeholder="Ingresa tu clave de API..." style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main);" />
+							</div>
+
+							<div id="ai-apiurl-group" class="hidden">
+								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">URL de Ollama:</label>
+								<input type="text" id="ai-apiurl" value="http://localhost:11434" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main);" />
+							</div>
+
+							<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px;">
+								<button id="btn-save-ai-config" class="btn btn-primary btn-full">Guardar Configuración</button>
+							</div>
+						</div>
+					</div>
+
 				</div>
 			</div>
 		</div>

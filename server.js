@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -106,8 +107,427 @@ function saveProjectState(projectId, state) {
   }
 }
 
+// Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa
+function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState }) {
+  return new Promise((resolve, reject) => {
+    const systemInstruction = `Eres un diseñador de bases de datos experto. Genera un esquema de base de datos ERD que responda a la solicitud del usuario en el siguiente formato JSON estricto. No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
+
+Esquema JSON esperado:
+{
+  "tables": [
+    {
+      "id": "string único (ej: tbl-users, tbl-orders)",
+      "name": "string (nombre de tabla sin espacios, snake_case, ej: usuarios, ordenes_compra)",
+      "x": 100, // número
+      "y": 100, // número
+      "fields": [
+        {
+          "id": "string único (ej: f-users-1, f-users-2)",
+          "name": "string (nombre de campo, snake_case, ej: id, email, created_at)",
+          "type": "string (ej: INT, VARCHAR(255), TEXT, DECIMAL(10,2), DATETIME, BOOLEAN)",
+          "isPK": boolean (si es clave primaria),
+          "isAutoIncrement": boolean (opcional, true si es PK autoincrementable),
+          "isNotNull": boolean (si es NOT NULL),
+          "isUnique": boolean (opcional, si es único),
+          "defaultValue": "string (opcional, valor por defecto)"
+        }
+      ],
+      "color": "string (código hexadecimal de color, ej: #6366f1, #10b981, #ef4444, #f59e0b, #ec4899, #06b6d4)"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "string único (ej: rel-1)",
+      "fromTable": "string (id de la tabla de origen/padre)",
+      "fromField": "string (id del campo de origen en la tabla de origen)",
+      "toTable": "string (id de la tabla de destino/hijo)",
+      "toField": "string (id del campo de destino en la tabla de destino)"
+    }
+  ],
+  "groups": []
+}
+
+Reglas importantes:
+1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
+2. Cada tabla debe tener una clave primaria (isPK: true).
+3. Todas las relaciones referenciadas en 'relationships' deben usar IDs de tablas y campos existentes en el JSON.
+4. Asigna coordenadas x e y distribuidas (ej. espaciadas cada 300px o en formato grid) para que las tablas no se superpongan inicialmente en el lienzo.
+5. Intenta elegir colores armoniosos para agrupar visualmente las tablas relacionadas.
+
+Estado actual del diagrama (si deseas extenderlo o relacionarlo, úsalo como base):
+${JSON.stringify(currentState || { tables: [], relationships: [], groups: [] })}
+`;
+
+    let requestBody = '';
+    let options = {};
+    let clientModule = https;
+
+    if (provider === 'gemini') {
+      const geminiModel = model || 'gemini-1.5-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
+      
+      requestBody = JSON.stringify({
+        contents: [{
+          parts: [{
+            text: `Requerimiento del usuario: ${prompt}\n\nInstrucción del sistema: ${systemInstruction}`
+          }]
+        }],
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
+      });
+
+      options = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      };
+
+      const req = https.request(url, options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              return reject(new Error(parsed.error.message || 'Error en la API de Gemini'));
+            }
+            const textResponse = parsed.candidates[0].content.parts[0].text;
+            resolve(JSON.parse(cleanJsonResponseText(textResponse)));
+          } catch (e) {
+            reject(new Error('La respuesta de Gemini no se pudo procesar como JSON: ' + e.message + '\nData recibida: ' + data));
+          }
+        });
+      });
+
+      req.on('error', (e) => reject(e));
+      req.write(requestBody);
+      req.end();
+
+    } else if (provider === 'openai') {
+      const openaiModel = model || 'gpt-4o-mini';
+      const url = 'https://api.openai.com/v1/chat/completions';
+      
+      requestBody = JSON.stringify({
+        model: openaiModel,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: prompt }
+        ]
+      });
+
+      options = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        }
+      };
+
+      const req = https.request(url, options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              return reject(new Error(parsed.error.message || 'Error en la API de OpenAI'));
+            }
+            const textResponse = parsed.choices[0].message.content;
+            resolve(JSON.parse(cleanJsonResponseText(textResponse)));
+          } catch (e) {
+            reject(new Error('La respuesta de OpenAI no se pudo procesar como JSON: ' + e.message));
+          }
+        });
+      });
+
+      req.on('error', (e) => reject(e));
+      req.write(requestBody);
+      req.end();
+
+    } else if (provider === 'ollama') {
+      const ollamaUrl = apiUrl || 'http://localhost:11434';
+      const url = `${ollamaUrl}/api/chat`;
+      clientModule = ollamaUrl.startsWith('https') ? https : http;
+
+      requestBody = JSON.stringify({
+        model: model || 'llama3',
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: prompt }
+        ],
+        stream: false,
+        format: 'json'
+      });
+
+      options = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      };
+
+      if (apiKey) {
+        options.headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
+      const req = clientModule.request(url, options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              return reject(new Error(parsed.error || 'Error en la API de Ollama'));
+            }
+            const textResponse = parsed.message.content;
+            resolve(JSON.parse(cleanJsonResponseText(textResponse)));
+          } catch (e) {
+            reject(new Error('La respuesta de Ollama no se pudo procesar como JSON: ' + e.message + '\nData: ' + data));
+          }
+        });
+      });
+
+      req.on('error', (e) => reject(new Error(`Ollama no está corriendo o la URL es inaccesible: ${e.message}`)));
+      req.write(requestBody);
+      req.end();
+    } else {
+      reject(new Error('Proveedor de IA no soportado.'));
+    }
+  });
+}
+
+// Helper para solicitar la documentación detallada en Markdown a la IA
+function makeAiDocRequest({ provider, apiKey, apiUrl, model, currentState }) {
+  return new Promise((resolve, reject) => {
+    const prompt = `Genera una documentación en Markdown (.md) elegante, detallada y profesional para el siguiente esquema de base de datos JSON.
+
+Esquema JSON de la Base de Datos:
+${JSON.stringify(currentState || { tables: [], relationships: [] }, null, 2)}
+
+La documentación debe incluir:
+1. Un título principal llamativo.
+2. Una introducción que describa conceptualmente el propósito general del sistema basándote en las tablas encontradas.
+3. Un índice de contenidos.
+4. Por cada tabla:
+   - Su nombre y una breve descripción de su función.
+   - Una tabla Markdown con sus campos, detallando: Nombre de columna, Tipo de dato, Llaves (PK/FK), si permite Nulos (NULL/NOT NULL), Valor por defecto (si lo tiene) y una descripción detallada que supongas para qué sirve ese campo.
+5. Una sección de Relaciones y Reglas de Negocio, describiendo qué tabla se relaciona con cuál y la cardinalidad.
+6. Un bloque de diagrama Mermaid que ilustre visualmente las relaciones entre tablas (usando la sintaxis erDiagram de Mermaid).
+
+Asegúrate de que la salida sea estrictamente Markdown limpio para poder ser guardado como un archivo .md. No agregues explicaciones fuera del bloque Markdown.`;
+
+    let requestBody = '';
+    let options = {};
+    let clientModule = https;
+
+    if (provider === 'gemini') {
+      const geminiModel = model || 'gemini-1.5-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
+      
+      requestBody = JSON.stringify({
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }]
+      });
+
+      options = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      };
+
+      const req = https.request(url, options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              return reject(new Error(parsed.error.message || 'Error en la API de Gemini'));
+            }
+            const textResponse = parsed.candidates[0].content.parts[0].text;
+            resolve(textResponse);
+          } catch (e) {
+            reject(new Error('La respuesta de Gemini no se pudo procesar: ' + e.message));
+          }
+        });
+      });
+
+      req.on('error', (e) => reject(e));
+      req.write(requestBody);
+      req.end();
+
+    } else if (provider === 'openai') {
+      const openaiModel = model || 'gpt-4o-mini';
+      const url = 'https://api.openai.com/v1/chat/completions';
+      
+      requestBody = JSON.stringify({
+        model: openaiModel,
+        messages: [
+          { role: 'user', content: prompt }
+        ]
+      });
+
+      options = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        }
+      };
+
+      const req = https.request(url, options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              return reject(new Error(parsed.error.message || 'Error en la API de OpenAI'));
+            }
+            const textResponse = parsed.choices[0].message.content;
+            resolve(textResponse);
+          } catch (e) {
+            reject(new Error('La respuesta de OpenAI no se pudo procesar: ' + e.message));
+          }
+        });
+      });
+
+      req.on('error', (e) => reject(e));
+      req.write(requestBody);
+      req.end();
+
+    } else if (provider === 'ollama') {
+      const ollamaUrl = apiUrl || 'http://localhost:11434';
+      const url = `${ollamaUrl}/api/chat`;
+      clientModule = ollamaUrl.startsWith('https') ? https : http;
+
+      requestBody = JSON.stringify({
+        model: model || 'llama3',
+        messages: [
+          { role: 'user', content: prompt }
+        ],
+        stream: false
+      });
+
+      options = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      };
+
+      if (apiKey) {
+        options.headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
+      const req = clientModule.request(url, options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              return reject(new Error(parsed.error || 'Error en la API de Ollama'));
+            }
+            const textResponse = parsed.message.content;
+            resolve(textResponse);
+          } catch (e) {
+            reject(new Error('La respuesta de Ollama no se pudo procesar: ' + e.message));
+          }
+        });
+      });
+
+      req.on('error', (e) => reject(new Error(`Ollama no está corriendo o la URL es inaccesible: ${e.message}`)));
+      req.write(requestBody);
+      req.end();
+    } else {
+      reject(new Error('Proveedor de IA no soportado.'));
+    }
+  });
+}
+
+// Limpia posibles tags markdown del JSON devuelto por la IA
+function cleanJsonResponseText(text) {
+  let cleaned = text.trim();
+  if (cleaned.startsWith('```json')) {
+    cleaned = cleaned.substring(7);
+  } else if (cleaned.startsWith('```')) {
+    cleaned = cleaned.substring(3);
+  }
+  if (cleaned.endsWith('```')) {
+    cleaned = cleaned.substring(0, cleaned.length - 3);
+  }
+  return cleaned.trim();
+}
+
 // HTTP Server to serve static files and API endpoints
 const server = http.createServer((req, res) => {
+  // POST /api/ai/generate - Proxy de Inteligencia Artificial
+  if (req.method === 'POST' && req.url === '/api/ai/generate') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', async () => {
+      try {
+        const params = JSON.parse(body);
+        if (!params.prompt) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'El campo "prompt" es obligatorio.' }));
+          return;
+        }
+        if (params.provider !== 'ollama' && !params.apiKey) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'La API Key es obligatoria para proveedores Cloud.' }));
+          return;
+        }
+
+        const aiResult = await makeAiRequest(params);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(aiResult));
+      } catch (err) {
+        console.error('Error en Proxy de IA:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/ai/document - Generar Documentación Markdown con IA
+  if (req.method === 'POST' && req.url === '/api/ai/document') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', async () => {
+      try {
+        const params = JSON.parse(body);
+        if (params.provider !== 'ollama' && !params.apiKey) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'La API Key es obligatoria para proveedores Cloud.' }));
+          return;
+        }
+
+        const mdDoc = await makeAiDocRequest(params);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ markdown: mdDoc }));
+      } catch (err) {
+        console.error('Error al documentar BD con IA:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   // GET /api/projects - List all projects
   if (req.url === '/api/projects') {
     try {

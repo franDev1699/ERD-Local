@@ -10,10 +10,15 @@ export class SidebarEditor {
     this.onFieldAdd = config.onFieldAdd;
     this.onFieldUpdate = config.onFieldUpdate;
     this.onFieldDelete = config.onFieldDelete;
+    this.onFieldMove = config.onFieldMove;
+    this.onFieldCopy = config.onFieldCopy;
     this.onGroupUpdate = config.onGroupUpdate;
     this.onGroupDelete = config.onGroupDelete;
     this.onBatchDelete = config.onBatchDelete;
     this.onBatchGroup = config.onBatchGroup;
+
+    // Drag & drop state for fields
+    this._dragFieldData = null;
   }
 
   render(tables, selectedTableIds, groups = []) {
@@ -161,8 +166,48 @@ export class SidebarEditor {
     // Fields List
     const fieldsList = document.createElement("div");
     fieldsList.className = "fields-list";
+    fieldsList.dataset.tableId = table.id;
     table.fields.forEach(field => {
       fieldsList.appendChild(this._createFieldEditorItem(table.id, field));
+    });
+
+    // Allow dropping fields into this table's list (cross-table or end-of-list)
+    fieldsList.addEventListener("dragover", (e) => {
+      if (!this._dragFieldData) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      fieldsList.classList.add("drop-target-active");
+    });
+
+    fieldsList.addEventListener("dragleave", (e) => {
+      // Only remove if leaving the container (not entering a child)
+      if (!fieldsList.contains(e.relatedTarget)) {
+        fieldsList.classList.remove("drop-target-active");
+      }
+    });
+
+    fieldsList.addEventListener("drop", (e) => {
+      e.preventDefault();
+      fieldsList.classList.remove("drop-target-active");
+
+      if (!this._dragFieldData) return;
+
+      const { fieldId: draggedFieldId, sourceTableId } = this._dragFieldData;
+      const targetTableId = table.id;
+      // Drop at end of list
+      const targetIndex = table.fields.length;
+      const isCopy = e.ctrlKey;
+
+      if (isCopy) {
+        if (this.onFieldCopy) {
+          this.onFieldCopy(sourceTableId, draggedFieldId, targetTableId, targetIndex);
+        }
+      } else {
+        if (this.onFieldMove) {
+          this.onFieldMove(sourceTableId, draggedFieldId, targetTableId, targetIndex);
+        }
+      }
+      this._dragFieldData = null;
     });
     content.appendChild(fieldsList);
 
@@ -203,6 +248,9 @@ export class SidebarEditor {
   _createFieldEditorItem(tableId, field) {
     const item = document.createElement("div");
     item.className = "field-editor-item";
+    item.draggable = true;
+    item.dataset.fieldId = field.id;
+    item.dataset.tableId = tableId;
 
     const pkChecked = field.isPK ? "checked" : "";
     const aiChecked = field.isAutoIncrement ? "checked" : "";
@@ -212,6 +260,7 @@ export class SidebarEditor {
 
     item.innerHTML = `
       <div class="field-editor-row-main">
+        <div class="field-drag-handle" title="Arrastrar para mover · Ctrl+Arrastrar para copiar"><i data-lucide="grip-vertical"></i></div>
         <input type="text" class="field-name-input" value="${field.name}" placeholder="nombre_campo">
         <select class="field-type-select">
           <option value="INT" ${field.type === 'INT' ? 'selected' : ''}>INT</option>
@@ -239,6 +288,95 @@ export class SidebarEditor {
         </div>
       </div>
     `;
+
+    // --- Drag & Drop events ---
+    item.addEventListener("dragstart", (e) => {
+      // Only allow drag from the handle
+      if (!e.target.closest(".field-drag-handle") && e.target !== item) {
+        // Allow dragstart but we check the mousedown origin
+      }
+      this._dragFieldData = { fieldId: field.id, sourceTableId: tableId };
+      e.dataTransfer.effectAllowed = "copyMove";
+      e.dataTransfer.setData("text/plain", field.id);
+      requestAnimationFrame(() => item.classList.add("dragging"));
+    });
+
+    item.addEventListener("dragend", () => {
+      item.classList.remove("dragging");
+      this._dragFieldData = null;
+      // Clean all visual indicators
+      this.container.querySelectorAll(".drag-over-top, .drag-over-bottom").forEach(el => {
+        el.classList.remove("drag-over-top", "drag-over-bottom");
+      });
+      this.container.querySelectorAll(".fields-list.drop-target-active").forEach(el => {
+        el.classList.remove("drop-target-active");
+      });
+    });
+
+    item.addEventListener("dragover", (e) => {
+      if (!this._dragFieldData) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = e.ctrlKey ? "copy" : "move";
+
+      const rect = item.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+
+      item.classList.remove("drag-over-top", "drag-over-bottom");
+      if (e.clientY < midY) {
+        item.classList.add("drag-over-top");
+      } else {
+        item.classList.add("drag-over-bottom");
+      }
+    });
+
+    item.addEventListener("dragleave", () => {
+      item.classList.remove("drag-over-top", "drag-over-bottom");
+    });
+
+    item.addEventListener("drop", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      item.classList.remove("drag-over-top", "drag-over-bottom");
+
+      if (!this._dragFieldData) return;
+
+      const { fieldId: draggedFieldId, sourceTableId } = this._dragFieldData;
+      const targetTableId = item.dataset.tableId;
+
+      // Compute target index
+      const fieldsList = item.closest(".fields-list");
+      const fieldItems = Array.from(fieldsList.querySelectorAll(".field-editor-item"));
+      let targetIndex = fieldItems.indexOf(item);
+
+      const rect = item.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      if (e.clientY >= midY) {
+        targetIndex += 1;
+      }
+
+      const isCopy = e.ctrlKey;
+
+      if (isCopy) {
+        // Copy: duplicate the field at target position
+        if (this.onFieldCopy) {
+          this.onFieldCopy(sourceTableId, draggedFieldId, targetTableId, targetIndex);
+        }
+      } else {
+        // Move: adjust index if reordering within same table and dragging downward
+        if (sourceTableId === targetTableId) {
+          const draggedItem = fieldsList.querySelector(`.field-editor-item[data-field-id="${draggedFieldId}"]`);
+          const draggedIndex = fieldItems.indexOf(draggedItem);
+          if (draggedIndex < targetIndex) {
+            targetIndex -= 1;
+          }
+        }
+        if (this.onFieldMove) {
+          this.onFieldMove(sourceTableId, draggedFieldId, targetTableId, targetIndex);
+        }
+      }
+
+      this._dragFieldData = null;
+    });
 
     // Event listeners
     const nameInput = item.querySelector(".field-name-input");

@@ -101,6 +101,54 @@ export class StateManager {
     }
   }
 
+  moveField(sourceTableId, fieldId, targetTableId, targetIndex) {
+    const sourceTable = this.state.tables.find(t => t.id === sourceTableId);
+    const targetTable = this.state.tables.find(t => t.id === targetTableId);
+    if (!sourceTable || !targetTable) return;
+
+    const fieldIndex = sourceTable.fields.findIndex(f => f.id === fieldId);
+    if (fieldIndex === -1) return;
+
+    const [field] = sourceTable.fields.splice(fieldIndex, 1);
+
+    // Clamp target index
+    const clampedIndex = Math.max(0, Math.min(targetTable.fields.length, targetIndex));
+    targetTable.fields.splice(clampedIndex, 0, field);
+
+    // Update relationships if field moved to a different table
+    if (sourceTableId !== targetTableId) {
+      this.state.relationships.forEach(rel => {
+        if (rel.fromTable === sourceTableId && rel.fromField === fieldId) {
+          rel.fromTable = targetTableId;
+        }
+        if (rel.toTable === sourceTableId && rel.toField === fieldId) {
+          rel.toTable = targetTableId;
+        }
+      });
+    }
+
+    this.notify();
+  }
+
+  copyField(sourceTableId, fieldId, targetTableId, targetIndex) {
+    const sourceTable = this.state.tables.find(t => t.id === sourceTableId);
+    const targetTable = this.state.tables.find(t => t.id === targetTableId);
+    if (!sourceTable || !targetTable) return;
+
+    const sourceField = sourceTable.fields.find(f => f.id === fieldId);
+    if (!sourceField) return;
+
+    const copiedField = {
+      ...JSON.parse(JSON.stringify(sourceField)),
+      id: `f-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+    };
+
+    const clampedIndex = Math.max(0, Math.min(targetTable.fields.length, targetIndex));
+    targetTable.fields.splice(clampedIndex, 0, copiedField);
+
+    this.notify();
+  }
+
   removeGroup(groupId) {
     if (this.state.groups) {
       this.state.groups = this.state.groups.filter(g => g.id !== groupId);
