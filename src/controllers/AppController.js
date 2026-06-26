@@ -646,34 +646,61 @@ export class AppController {
     this.history.push(JSON.parse(JSON.stringify(state)));
 
     const groups = state.groups || [];
+
+    const estimateTableHeight = (table) => {
+      const fieldCount = table.fields ? table.fields.length : 0;
+      // Header is approx 52px, each field is 32px, bottom padding is 16px
+      return 52 + (fieldCount * 32) + 16;
+    };
     
     // 1. Organize tables within each group
     groups.forEach(group => {
       const groupTables = state.tables.filter(t => t.groupId === group.id);
       if (groupTables.length === 0) return;
 
-      const paddingLeft = 30;
-      const paddingTop = 60; // leave room for group title
-      const spacingX = 280;  // 240 width + 40 gap
-      const spacingY = 160;  // approx height + gap
+      const paddingLeft = 40;
+      const paddingTop = 75; // More space for group title
+      const paddingRight = 40;
+      const paddingBottom = 40;
+      const gapX = 60;
+      const gapY = 60;
+      const tableWidth = 240;
       
       const colCount = Math.ceil(Math.sqrt(groupTables.length));
+      const rowCount = Math.ceil(groupTables.length / colCount);
+
+      // Calcular la altura máxima de cada fila
+      const rowHeights = [];
+      for (let r = 0; r < rowCount; r++) {
+        let maxH = 0;
+        for (let c = 0; c < colCount; c++) {
+          const idx = r * colCount + c;
+          if (idx < groupTables.length) {
+            maxH = Math.max(maxH, estimateTableHeight(groupTables[idx]));
+          }
+        }
+        rowHeights.push(maxH);
+      }
       
       groupTables.forEach((table, index) => {
         const col = index % colCount;
         const row = Math.floor(index / colCount);
-        table.x = group.x + paddingLeft + col * spacingX;
-        table.y = group.y + paddingTop + row * spacingY;
+
+        table.x = group.x + paddingLeft + col * (tableWidth + gapX);
+
+        let yOffset = paddingTop;
+        for (let r = 0; r < row; r++) {
+          yOffset += rowHeights[r] + gapY;
+        }
+        table.y = group.y + yOffset;
       });
 
       // Expand the group size if there are more tables than fit
-      const cols = colCount;
-      const rows = Math.ceil(groupTables.length / cols);
-      const minWidth = paddingLeft + cols * spacingX;
-      const minHeight = paddingTop + rows * spacingY;
+      const totalWidth = paddingLeft + colCount * tableWidth + (colCount - 1) * gapX + paddingRight;
+      const totalHeight = paddingTop + rowHeights.reduce((sum, h) => sum + h, 0) + (rowCount - 1) * gapY + paddingBottom;
 
-      if (group.width < minWidth) group.width = minWidth;
-      if (group.height < minHeight) group.height = minHeight;
+      group.width = Math.max(group.width || 0, totalWidth);
+      group.height = Math.max(group.height || 0, totalHeight);
     });
 
     // 2. Globally organize groups first, then ungrouped tables
@@ -695,7 +722,7 @@ export class AppController {
         table.y += dy;
       });
 
-      currentX += group.width + 100; // Spacing between groups
+      currentX += group.width + 120; // Generoso margen entre grupos
       maxRowHeight = Math.max(maxRowHeight, group.height);
     });
 
@@ -704,24 +731,46 @@ export class AppController {
     if (ungroupedTables.length > 0) {
       if (groups.length > 0) {
         currentX = 100;
-        currentY += maxRowHeight + 150; // Spacing below groups
+        currentY += maxRowHeight + 150; // Margen generoso debajo de los grupos
       }
 
       const colCount = Math.ceil(Math.sqrt(ungroupedTables.length));
-      const spacingX = 280;
-      const spacingY = 220;
+      const rowCount = Math.ceil(ungroupedTables.length / colCount);
+
+      const gapX = 80;
+      const gapY = 80;
+      const tableWidth = 240;
+
+      // Calcular la altura máxima de cada fila para tablas sin grupo
+      const rowHeights = [];
+      for (let r = 0; r < rowCount; r++) {
+        let maxH = 0;
+        for (let c = 0; c < colCount; c++) {
+          const idx = r * colCount + c;
+          if (idx < ungroupedTables.length) {
+            maxH = Math.max(maxH, estimateTableHeight(ungroupedTables[idx]));
+          }
+        }
+        rowHeights.push(maxH);
+      }
 
       ungroupedTables.forEach((table, index) => {
         const col = index % colCount;
         const row = Math.floor(index / colCount);
-        table.x = currentX + col * spacingX;
-        table.y = currentY + row * spacingY;
+
+        table.x = currentX + col * (tableWidth + gapX);
+
+        let yOffset = 0;
+        for (let r = 0; r < row; r++) {
+          yOffset += rowHeights[r] + gapY;
+        }
+        table.y = currentY + yOffset;
       });
     }
 
     this.stateManager.notify();
     this.canvasManager.fitToContent(this.stateManager.getState().tables);
-    this.uiManager.showToast("Tablas organizadas.", "success");
+    this.uiManager.showToast("Tablas organizadas con éxito.", "success");
   }
 
   undo() {
@@ -737,6 +786,37 @@ export class AppController {
     if (next) {
       this.stateManager.setState(next);
       this.uiManager.showToast("Rehecho", "info");
+    }
+  }
+
+  async copyToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (e) {
+        console.warn("Failed to copy with navigator.clipboard: ", e);
+      }
+    }
+
+    // Fallback for non-HTTPS or other blocked clipboard API situations
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+    textArea.style.opacity = "0";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      const successful = document.execCommand("copy");
+      document.body.removeChild(textArea);
+      return !!successful;
+    } catch (err) {
+      document.body.removeChild(textArea);
+      console.error("Fallback copy failed: ", err);
+      return false;
     }
   }
 
@@ -899,10 +979,13 @@ export class AppController {
     }
 
     if (btnCopyMarkdown && markdownTextArea) {
-      btnCopyMarkdown.addEventListener("click", () => {
-        navigator.clipboard.writeText(markdownTextArea.value)
-          .then(() => this.uiManager.showToast("Documentación copiada al portapapeles.", "success"))
-          .catch(() => this.uiManager.showToast("Error al copiar al portapapeles.", "error"));
+      btnCopyMarkdown.addEventListener("click", async () => {
+        const success = await this.copyToClipboard(markdownTextArea.value);
+        if (success) {
+          this.uiManager.showToast("Documentación copiada al portapapeles.", "success");
+        } else {
+          this.uiManager.showToast("Error al copiar al portapapeles. Selecciónalo manualmente.", "error");
+        }
       });
     }
 
@@ -946,12 +1029,15 @@ export class AppController {
     // Copiar SQL
     const btnCopySql = document.getElementById("btn-copy-sql");
     if (btnCopySql) {
-      btnCopySql.addEventListener("click", () => {
+      btnCopySql.addEventListener("click", async () => {
         const sqlCodeBlock = document.getElementById("sql-code-block");
         if (sqlCodeBlock) {
-          navigator.clipboard.writeText(sqlCodeBlock.textContent)
-            .then(() => this.uiManager.showToast("Código SQL copiado al portapapeles.", "success"))
-            .catch(() => this.uiManager.showToast("Error al copiar código.", "error"));
+          const success = await this.copyToClipboard(sqlCodeBlock.textContent);
+          if (success) {
+            this.uiManager.showToast("Código SQL copiado al portapapeles.", "success");
+          } else {
+            this.uiManager.showToast("Error al copiar código. Selecciónalo manualmente.", "error");
+          }
         }
       });
     }
@@ -1119,23 +1205,14 @@ export class AppController {
     const btnCopyShare = document.getElementById("btn-copy-share");
     const shareLinkInput = document.getElementById("share-link-input");
     if (btnCopyShare && shareLinkInput) {
-      btnCopyShare.addEventListener("click", () => {
+      btnCopyShare.addEventListener("click", async () => {
         if (!shareLinkInput.value) return;
-
-        if (navigator.clipboard && window.isSecureContext) {
-          navigator.clipboard.writeText(shareLinkInput.value)
-            .then(() => this.uiManager.showToast("Enlace de compartir copiado.", "success"))
-            .catch(() => this.uiManager.showToast("Error al copiar enlace.", "error"));
+        const success = await this.copyToClipboard(shareLinkInput.value);
+        if (success) {
+          this.uiManager.showToast("Enlace de compartir copiado.", "success");
         } else {
-          // Fallback if clipboard API is blocked (e.g. non-HTTPS local network IP)
+          this.uiManager.showToast("Presiona Ctrl+C para copiar el enlace seleccionado.", "info");
           shareLinkInput.select();
-          shareLinkInput.setSelectionRange(0, 99999);
-          try {
-            document.execCommand("copy");
-            this.uiManager.showToast("Enlace copiado.", "success");
-          } catch (e) {
-            this.uiManager.showToast("Presiona Ctrl+C para copiar el enlace seleccionado.", "info");
-          }
         }
       });
     }
@@ -1707,8 +1784,8 @@ export class AppController {
           const mode = selectMode ? selectMode.value : "replace";
           const currentState = this.stateManager.getState();
           
-          // Realizar llamada al proxy
-          const result = await AiService.generate(prompt, mode === 'append' ? currentState : null);
+          // Realizar llamada al proxy (pasamos el estado actual si no es modo reemplazar)
+          const result = await AiService.generate(prompt, mode !== 'replace' ? currentState : null);
 
           if (!result || !result.tables || !Array.isArray(result.tables)) {
             throw new Error("El JSON retornado por la IA no tiene el formato correcto.");
@@ -1725,6 +1802,126 @@ export class AppController {
               groups: result.groups || []
             });
             this.uiManager.showToast("Diagrama generado por IA con éxito.", "success");
+          } else if (mode === 'edit') {
+            // Modo editar inteligente (Modificar/Editar conservando IDs y posiciones)
+            const currentTables = currentState.tables || [];
+            const currentRelationships = currentState.relationships || [];
+            const currentGroups = currentState.groups || [];
+
+            const newTables = [];
+            const tableIdMap = {};
+            const fieldIdMap = {};
+
+            result.tables.forEach(aiTable => {
+              // Buscar tabla original coincidente por ID o por nombre (case-insensitive)
+              const originalTable = currentTables.find(t => t.id === aiTable.id) || 
+                                    currentTables.find(t => t.name.toLowerCase() === aiTable.name.toLowerCase());
+
+              const finalTableId = originalTable ? originalTable.id : (aiTable.id || `tbl-ai-${Date.now()}-${Math.floor(Math.random() * 1000)}`);
+              tableIdMap[aiTable.id] = finalTableId;
+
+              // Mezclar campos
+              const finalFields = [];
+              if (aiTable.fields && Array.isArray(aiTable.fields)) {
+                aiTable.fields.forEach(aiField => {
+                  let originalField = null;
+                  if (originalTable && originalTable.fields) {
+                    originalField = originalTable.fields.find(f => f.id === aiField.id) ||
+                                    originalTable.fields.find(f => f.name.toLowerCase() === aiField.name.toLowerCase());
+                  }
+
+                  const finalFieldId = originalField ? originalField.id : (aiField.id || `f-ai-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+                  fieldIdMap[aiField.id] = finalFieldId;
+
+                  finalFields.push({
+                    id: finalFieldId,
+                    name: aiField.name,
+                    type: aiField.type,
+                    isPK: !!aiField.isPK,
+                    isAutoIncrement: !!aiField.isAutoIncrement,
+                    isNotNull: !!aiField.isNotNull,
+                    isUnique: !!aiField.isUnique,
+                    defaultValue: aiField.defaultValue || ""
+                  });
+                });
+              }
+
+              // Construir la tabla combinada
+              newTables.push({
+                id: finalTableId,
+                name: aiTable.name,
+                // Preservar coordenadas originales si existen
+                x: originalTable ? originalTable.x : (aiTable.x !== undefined ? aiTable.x : 100),
+                y: originalTable ? originalTable.y : (aiTable.y !== undefined ? aiTable.y : 100),
+                fields: finalFields,
+                color: aiTable.color || (originalTable ? originalTable.color : "#6366f1"),
+                groupId: aiTable.groupId || (originalTable ? originalTable.groupId : null)
+              });
+            });
+
+            // Mezclar grupos
+            const newGroups = [];
+            if (result.groups && Array.isArray(result.groups)) {
+              result.groups.forEach(aiGroup => {
+                const originalGroup = currentGroups.find(g => g.id === aiGroup.id) ||
+                                      currentGroups.find(g => g.name.toLowerCase() === aiGroup.name.toLowerCase());
+                
+                const finalGroupId = originalGroup ? originalGroup.id : (aiGroup.id || `group-ai-${Date.now()}-${Math.floor(Math.random() * 1000)}`);
+                
+                // Actualizar tablas que referencian este grupo
+                result.tables.forEach(t => {
+                  if (t.groupId === aiGroup.id) {
+                    t.groupId = finalGroupId;
+                  }
+                });
+
+                newGroups.push({
+                  id: finalGroupId,
+                  name: aiGroup.name,
+                  color: aiGroup.color || (originalGroup ? originalGroup.color : "#374151"),
+                  x: originalGroup ? originalGroup.x : (aiGroup.x !== undefined ? aiGroup.x : 100),
+                  y: originalGroup ? originalGroup.y : (aiGroup.y !== undefined ? aiGroup.y : 100),
+                  width: originalGroup ? originalGroup.width : (aiGroup.width !== undefined ? aiGroup.width : 300),
+                  height: originalGroup ? originalGroup.height : (aiGroup.height !== undefined ? aiGroup.height : 200)
+                });
+              });
+            }
+
+            // Mezclar relaciones con los IDs finales mapeados
+            const newRelationships = [];
+            if (result.relationships && Array.isArray(result.relationships)) {
+              result.relationships.forEach(rel => {
+                const mappedFromTable = tableIdMap[rel.fromTable] || rel.fromTable;
+                const mappedToTable = tableIdMap[rel.toTable] || rel.toTable;
+                const mappedFromField = fieldIdMap[rel.fromField] || rel.fromField;
+                const mappedToField = fieldIdMap[rel.toField] || rel.toField;
+
+                const fromTableObj = newTables.find(t => t.id === mappedFromTable);
+                const toTableObj = newTables.find(t => t.id === mappedToTable);
+
+                if (fromTableObj && toTableObj) {
+                  const fromFieldExists = fromTableObj.fields.some(f => f.id === mappedFromField);
+                  const toFieldExists = toTableObj.fields.some(f => f.id === mappedToField);
+
+                  if (fromFieldExists && toFieldExists) {
+                    newRelationships.push({
+                      id: rel.id || `rel-ai-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                      fromTable: mappedFromTable,
+                      fromField: mappedFromField,
+                      toTable: mappedToTable,
+                      toField: mappedToField
+                    });
+                  }
+                }
+              });
+            }
+
+            this.stateManager.setState({
+              tables: newTables,
+              relationships: newRelationships,
+              groups: newGroups
+            });
+            this.uiManager.showToast("Diagrama modificado con IA con éxito.", "success");
           } else {
             // Combinar estados (modo append)
             const currentTables = [...currentState.tables];
@@ -1808,8 +2005,24 @@ export class AppController {
             this.uiManager.showToast(`IA agregó ${result.tables.length} tablas y ${result.relationships?.length || 0} relaciones.`, "success");
           }
 
-          // Ejecutar autoLayout para acomodar todo limpiamente
-          this.autoLayout();
+          // Determinar si debemos ejecutar autoLayout (sólo si es replace o si el usuario pide explícitamente organizar)
+          const promptLower = prompt.toLowerCase();
+          const containsLayoutKeyword = promptLower.includes("organiza") || 
+                                        promptLower.includes("acomoda") || 
+                                        promptLower.includes("layout") || 
+                                        promptLower.includes("alinea") || 
+                                        promptLower.includes("distribuye") ||
+                                        promptLower.includes("margin") || 
+                                        promptLower.includes("margen") ||
+                                        promptLower.includes("orden");
+
+          if (mode === 'replace' || containsLayoutKeyword) {
+            this.autoLayout();
+          } else {
+            // Solo notificar cambios y centrar
+            this.stateManager.notify();
+            this.canvasManager.fitToContent(this.stateManager.getState().tables);
+          }
 
           // Cerrar modal
           textareaPrompt.value = "";

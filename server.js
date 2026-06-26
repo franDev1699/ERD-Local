@@ -132,7 +132,8 @@ Esquema JSON esperado:
           "defaultValue": "string (opcional, valor por defecto)"
         }
       ],
-      "color": "string (código hexadecimal de color, ej: #6366f1, #10b981, #ef4444, #f59e0b, #ec4899, #06b6d4)"
+      "color": "string (código hexadecimal de color, ej: #6366f1, #10b981, #ef4444, #f59e0b, #ec4899, #06b6d4)",
+      "groupId": "string o null (id del grupo al que pertenece la tabla, o null si ninguno)"
     }
   ],
   "relationships": [
@@ -144,7 +145,17 @@ Esquema JSON esperado:
       "toField": "string (id del campo de destino en la tabla de destino)"
     }
   ],
-  "groups": []
+  "groups": [
+    {
+      "id": "string único (ej: group-1)",
+      "name": "string (nombre del grupo)",
+      "color": "string (código hexadecimal de color, ej: #374151)",
+      "x": 100, // número
+      "y": 100, // número
+      "width": 300, // número
+      "height": 200 // número
+    }
+  ]
 }
 
 Reglas importantes:
@@ -152,7 +163,8 @@ Reglas importantes:
 2. Cada tabla debe tener una clave primaria (isPK: true).
 3. Todas las relaciones referenciadas en 'relationships' deben usar IDs de tablas y campos existentes en el JSON.
 4. Asigna coordenadas x e y distribuidas (ej. espaciadas cada 300px o en formato grid) para que las tablas no se superpongan inicialmente en el lienzo.
-5. Intenta elegir colores armoniosos para agrupar visualmente las tablas relacionadas.
+5. Si el usuario pide editar, renombrar, eliminar, reorganizar o modificar partes, grupos, tablas o campos existentes, modifica el 'Estado actual del diagrama' suministrado y devuelve el estado completo con esas modificaciones aplicadas. Conserva los IDs existentes de las tablas, campos y grupos que no hayan sido eliminados para no romper relaciones ni coordenadas.
+6. Intenta elegir colores armoniosos para agrupar visualmente las tablas relacionadas o agruparlas físicamente dentro de 'groups'.
 
 Estado actual del diagrama (si deseas extenderlo o relacionarlo, úsalo como base):
 ${JSON.stringify(currentState || { tables: [], relationships: [], groups: [] })}
