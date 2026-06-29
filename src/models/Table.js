@@ -4,8 +4,8 @@ export class Table {
   constructor({ id, name, x, y, fields = [] }) {
     this.id = id || `tbl-${Date.now()}`;
     this.name = name || 'nueva_tabla';
-    this.x = x || 100;
-    this.y = y || 100;
+    this.x = x || 1500;
+    this.y = y || 1500;
     this.fields = fields;
   }
 

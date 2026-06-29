@@ -108,11 +108,10 @@ function saveProjectState(projectId, state) {
 }
 
 // Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa
-function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState }) {
+// Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa
+function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql }) {
   return new Promise((resolve, reject) => {
-    const systemInstruction = `Eres un diseñador de bases de datos experto. Genera un esquema de base de datos ERD que responda a la solicitud del usuario en el siguiente formato JSON estricto. No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
-
-Esquema JSON esperado:
+    const expectedSchemaText = `Esquema JSON esperado:
 {
   "tables": [
     {
@@ -158,17 +157,154 @@ Esquema JSON esperado:
   ]
 }
 
+IMPORTANTE - IDIOMA DE NOMENCLATURA:
+Todos los nombres de tablas, campos y grupos DEBEN estar en INGLÉS (snake_case). Ejemplos: users, orders, created_at, product_name, order_items. Nunca uses nombres en español como 'usuarios', 'pedidos', 'nombre_producto'.`;
+
+    const layoutRulesText = `REGLAS DE DISEÑO DE COORDENADAS Y AGRUPACIONES (CRÍTICO):
+1. NO permitas la superposición de ningún elemento. Las tablas y los grupos deben estar claramente separados y no superponerse.
+2. ESPACIADO GENERAL:
+   - Mantén al menos 100px de separación entre cualquier tabla suelta (sin grupo) y otros elementos (otras tablas o grupos).
+   - Mantén al menos 150px de separación entre grupos distintos.
+3. TABLAS DENTRO DE GRUPOS (groupId definido):
+   - Una tabla perteneciente a un grupo DEBE ubicarse físicamente dentro de los límites de ese grupo.
+   - PADDING SUPERIOR (Grupo): El título del grupo se renderiza en la parte superior. Las tablas dentro del grupo DEBEN tener su coordenada 'y' al menos a 60px del borde superior del grupo (ej: y_tabla >= group.y + 60). Nunca coloques una tabla cubriendo el título del grupo.
+   - PADDING LATERAL E INFERIOR (Grupo): Las tablas deben estar separadas de los bordes izquierdo y derecho por al menos 30px, y del borde inferior del grupo por al menos 50px (ej: y_tabla + alto_tabla <= group.y + group.height - 50). Esto evita estrictamente que peguen al borde inferior del grupo.
+   - ESPACIADO INTERNO: Las tablas dentro del mismo grupo deben distribuirse ordenadamente (p. ej. en columnas o cuadrícula). Deja al menos 80px de distancia horizontal y 60px de distancia vertical entre las tablas del mismo grupo.
+   - TAMAÑO DEL GRUPO: Ajusta 'width' y 'height' del grupo de manera proporcional para que todas sus tablas quepan holgadamente dentro, respetando los paddings y márgenes descritos (ej. para dos tablas medianas de alto 200px en vertical, el grupo necesita al menos width: 310px y height: 510px).`;
+
+    let systemInstruction = '';
+
+    if (mode === 'append') {
+      systemInstruction = `Eres un diseñador de bases de datos experto. El usuario desea AGREGAR nuevos elementos (tablas, relaciones, grupos) al diagrama actual. 
+NO debes modificar, renombrar, alterar ni eliminar ninguna de las tablas, campos, relaciones ni grupos existentes en el 'Estado actual del diagrama' suministrado.
+Genera únicamente los NUEVOS elementos que se deben agregar para cumplir la solicitud.
+
+Tu respuesta en formato JSON estricto debe incluir:
+1. En "tables": Únicamente las NUEVAS tablas que se van a agregar. NO incluyas ninguna de las tablas existentes del 'Estado actual del diagrama'.
+2. En "relationships": Únicamente las NUEVAS relaciones creadas. Puedes relacionar las tablas nuevas entre sí, o relacionar las tablas nuevas con las existentes usando los IDs de las tablas existentes. NO incluyas relaciones que ya existen.
+3. En "groups": Únicamente los NUEVOS grupos creados (si aplica).
+No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
+
+${expectedSchemaText}
+
+Reglas importantes:
+1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
+2. Cada tabla nueva debe tener una clave primaria (isPK: true).
+3. Las nuevas relaciones en 'relationships' deben usar IDs de tablas y campos existentes en el estado actual o en las nuevas tablas.
+4. Asigna coordenadas x e y a las nuevas tablas y grupos de acuerdo con las siguientes directrices:
+${layoutRulesText}
+5. Queda estrictamente PROHIBIDO incluir tablas o relaciones existentes en el JSON de respuesta. Solo devuelve lo NUEVO.
+
+Estado actual del diagrama (para referencia de contexto, nombres e IDs existentes):
+${JSON.stringify(currentState || { tables: [], relationships: [], groups: [] })}`;
+    } else if (mode === 'edit') {
+      systemInstruction = `Eres un diseñador de bases de datos experto. El usuario desea MODIFICAR o EDITAR el diagrama actual.
+Analiza el 'Estado actual del diagrama' suministrado y aplica únicamente los cambios solicitados por el usuario (por ejemplo: agregar o modificar campos, renombrar una tabla, agregar una relación, eliminar una tabla, etc.).
+NO alteres, reescribas ni elimines tablas, campos, tipos o relaciones a menos que el usuario lo pida explícitamente. Mantén la estructura existente intacta tanto como sea posible.
+
+Debes devolver el estado COMPLETO del diagrama en tu respuesta JSON, incluyendo todas las tablas y relaciones (tanto las modificadas como las no modificadas). Conserva estrictamente los IDs existentes (de tablas, campos, relaciones y grupos) que no hayan sido eliminados para no romper el lienzo.
+No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
+
+${expectedSchemaText}
+
+Reglas importantes:
+1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
+2. Cada tabla debe tener una clave primaria (isPK: true).
+3. Conserva los IDs originales de las tablas, campos y relaciones que no cambien.
+4. Si agregas o reposicionas tablas o grupos, sigue estrictamente estas directrices:
+${layoutRulesText}
+4. Si el usuario pide eliminar algún elemento, puedes omitirlo del JSON de salida.
+
+Estado actual del diagrama (si deseas extenderlo o relacionarlo, úsalo como base):
+${JSON.stringify(currentState || { tables: [], relationships: [], groups: [] })}`;
+    } else if (mode === 'layout') {
+      systemInstruction = `Eres un diseñador de bases de datos experto. El usuario desea REORGANIZAR las posiciones y dimensiones de las tablas y grupos del diagrama para mejorar su legibilidad y estética.
+NO agregues, modifiques ni elimines ninguna tabla, campo, tipo ni relación. Solo debes ajustar las coordenadas (x, y) de las tablas y de los grupos, y las dimensiones (width, height) de los grupos.
+Agrupa físicamente cerca las tablas relacionadas, manteniendo un excelente espacio libre entre ellas.
+
+Debes devolver el estado COMPLETO del diagrama en tu respuesta JSON, incluyendo exactamente las mismas tablas, relaciones y grupos (con sus nombres e IDs idénticos), pero con coordenadas optimizadas.
+No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
+
+${expectedSchemaText}
+
+Reglas importantes:
+1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
+2. No cambies nombres de tablas, campos ni relaciones. Tampoco añadas ni elimines campos.
+3. Organiza todas las coordenadas y dimensiones del diagrama siguiendo al pie de la letra estas directrices:
+${layoutRulesText}
+
+Estado actual del diagrama:
+${JSON.stringify(currentState || { tables: [], relationships: [], groups: [] })}`;
+    } else if (mode === 'query_generate') {
+      systemInstruction = `Eres un administrador de bases de datos y desarrollador SQL experto.
+Tu tarea es generar o modificar una consulta SQL basada en la descripción del usuario y el esquema de base de datos suministrado.
+El motor de base de datos destino es: ${engine || 'PostgreSQL'}.
+Asegúrate de que la consulta SQL use la sintaxis correcta del motor destino, califique los nombres de los campos de manera clara y use JOINs adecuados si hay relaciones entre las tablas.
+
+Debes devolver la respuesta estrictamente en el siguiente formato JSON:
+{
+  "name": "Nombre corto descriptivo de la consulta",
+  "sql": "Código SQL formateado y listo para ejecutar",
+  "explanation": "Breve explicación de una línea sobre cómo funciona la consulta"
+}
+
+No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON.
+
+Esquema actual de base de datos:
+${JSON.stringify(currentState || { tables: [], relationships: [] })}
+${currentQuerySql ? `\nConsulta SQL actual a modificar:\n${currentQuerySql}` : ''}`;
+    } else if (mode === 'query_suggest') {
+      systemInstruction = `Eres un administrador de bases de datos y desarrollador SQL experto.
+Analiza el esquema de base de datos suministrado y sugiere 3 consultas SQL de negocio o analíticas útiles (ej. reportes, acumulados, cruces de información).
+Para cada sugerencia, proporciona un nombre y un prompt descriptivo en español que el usuario pueda usar para generar la consulta.
+
+Debes devolver la respuesta estrictamente en el siguiente formato JSON de arreglo:
+[
+  {
+    "name": "ej: Usuarios con más compras",
+    "prompt": "ej: Muestra los top 5 usuarios con mayor volumen de compras y sus datos de perfil"
+  },
+  ...
+]
+
+No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON.
+
+Esquema de base de datos:
+${JSON.stringify(currentState || { tables: [], relationships: [] })}`;
+    } else if (mode === 'query_explain') {
+      systemInstruction = `Eres un administrador de bases de datos y profesor SQL experto.
+Tu tarea es explicar de manera clara y detallada cómo funciona la consulta SQL proporcionada por el usuario.
+El motor de base de datos es: ${engine || 'PostgreSQL'}.
+
+Debes explicar:
+1. Qué hace la consulta paso a paso (SELECT, FROM, JOINs, WHERE, GROUP BY, ORDER BY, etc.)
+2. Qué tablas y campos involucra y por qué
+3. Si usa JOINs, explica el tipo de JOIN y cómo conecta las tablas
+4. Si tiene funciones de agregación, subconsultas o CTEs, explícalas
+5. Posibles optimizaciones o mejoras si las detectas
+
+Devuelve la respuesta estrictamente en el siguiente formato JSON:
+{
+  "explanation": "Explicación detallada y bien formateada de la consulta"
+}
+
+No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON. Responde en español.
+
+Esquema actual de base de datos:
+${JSON.stringify(currentState || { tables: [], relationships: [] })}`;
+    } else {
+      systemInstruction = `Eres un diseñador de bases de datos experto. Genera un esquema de base de datos ERD desde cero que responda a la solicitud del usuario en el siguiente formato JSON estricto. No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
+
+${expectedSchemaText}
+
 Reglas importantes:
 1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
 2. Cada tabla debe tener una clave primaria (isPK: true).
 3. Todas las relaciones referenciadas en 'relationships' deben usar IDs de tablas y campos existentes en el JSON.
-4. Asigna coordenadas x e y distribuidas (ej. espaciadas cada 300px o en formato grid) para que las tablas no se superpongan inicialmente en el lienzo.
-5. Si el usuario pide editar, renombrar, eliminar, reorganizar o modificar partes, grupos, tablas o campos existentes, modifica el 'Estado actual del diagrama' suministrado y devuelve el estado completo con esas modificaciones aplicadas. Conserva los IDs existentes de las tablas, campos y grupos que no hayan sido eliminados para no romper relaciones ni coordenadas.
-6. Intenta elegir colores armoniosos para agrupar visualmente las tablas relacionadas o agruparlas físicamente dentro de 'groups'.
-
-Estado actual del diagrama (si deseas extenderlo o relacionarlo, úsalo como base):
-${JSON.stringify(currentState || { tables: [], relationships: [], groups: [] })}
+4. Asigna coordenadas x e y, así como dimensiones de grupos y tablas de forma distribuida de acuerdo con estas directrices:
+${layoutRulesText}
 `;
+    }
 
     let requestBody = '';
     let options = {};
@@ -217,45 +353,78 @@ ${JSON.stringify(currentState || { tables: [], relationships: [], groups: [] })}
       req.write(requestBody);
       req.end();
 
-    } else if (provider === 'openai') {
-      const openaiModel = model || 'gpt-4o-mini';
-      const url = 'https://api.openai.com/v1/chat/completions';
+    } else if (['openai', 'vllm', 'litellm', 'custom-openai'].includes(provider)) {
+      const modelName = model || (provider === 'openai' ? 'gpt-4o-mini' : '');
+      let requestUrl = '';
       
-      requestBody = JSON.stringify({
-        model: openaiModel,
-        response_format: { type: "json_object" },
+      if (provider === 'openai') {
+        requestUrl = 'https://api.openai.com/v1/chat/completions';
+      } else {
+        let base = apiUrl || '';
+        base = base.trim();
+        if (base.endsWith('/')) {
+          base = base.slice(0, -1);
+        }
+        if (base.endsWith('/chat/completions')) {
+          requestUrl = base;
+        } else if (base.endsWith('/v1')) {
+          requestUrl = `${base}/chat/completions`;
+        } else if (base.includes('/v1')) {
+          requestUrl = `${base}/chat/completions`;
+        } else {
+          requestUrl = `${base}/v1/chat/completions`;
+        }
+      }
+
+      clientModule = requestUrl.startsWith('https') ? https : http;
+
+      const requestPayload = {
+        model: modelName,
         messages: [
           { role: 'system', content: systemInstruction },
           { role: 'user', content: prompt }
         ]
-      });
+      };
+
+      if (provider === 'openai') {
+        requestPayload.response_format = { type: "json_object" };
+      }
+
+      requestBody = JSON.stringify(requestPayload);
 
       options = {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
+          'Content-Type': 'application/json'
         }
       };
 
-      const req = https.request(url, options, (res) => {
+      if (apiKey) {
+        options.headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
+      const req = clientModule.request(requestUrl, options, (res) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
             if (parsed.error) {
-              return reject(new Error(parsed.error.message || 'Error en la API de OpenAI'));
+              const errMsg = parsed.error.message || (typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error));
+              return reject(new Error(errMsg || 'Error en el proveedor compatible con OpenAI'));
+            }
+            if (!parsed.choices || parsed.choices.length === 0 || !parsed.choices[0].message) {
+              return reject(new Error('Respuesta inválida del proveedor compatible con OpenAI. Data: ' + data));
             }
             const textResponse = parsed.choices[0].message.content;
             resolve(JSON.parse(cleanJsonResponseText(textResponse)));
           } catch (e) {
-            reject(new Error('La respuesta de OpenAI no se pudo procesar como JSON: ' + e.message));
+            reject(new Error('La respuesta del proveedor de IA no se pudo procesar como JSON: ' + e.message + '\nData: ' + data));
           }
         });
       });
 
-      req.on('error', (e) => reject(e));
+      req.on('error', (e) => reject(new Error(`No se pudo conectar con el servidor de IA (${requestUrl}): ${e.message}`)));
       req.write(requestBody);
       req.end();
 
@@ -375,12 +544,33 @@ Asegúrate de que la salida sea estrictamente Markdown limpio para poder ser gua
       req.write(requestBody);
       req.end();
 
-    } else if (provider === 'openai') {
-      const openaiModel = model || 'gpt-4o-mini';
-      const url = 'https://api.openai.com/v1/chat/completions';
+    } else if (['openai', 'vllm', 'litellm', 'custom-openai'].includes(provider)) {
+      const modelName = model || (provider === 'openai' ? 'gpt-4o-mini' : '');
+      let requestUrl = '';
       
+      if (provider === 'openai') {
+        requestUrl = 'https://api.openai.com/v1/chat/completions';
+      } else {
+        let base = apiUrl || '';
+        base = base.trim();
+        if (base.endsWith('/')) {
+          base = base.slice(0, -1);
+        }
+        if (base.endsWith('/chat/completions')) {
+          requestUrl = base;
+        } else if (base.endsWith('/v1')) {
+          requestUrl = `${base}/chat/completions`;
+        } else if (base.includes('/v1')) {
+          requestUrl = `${base}/chat/completions`;
+        } else {
+          requestUrl = `${base}/v1/chat/completions`;
+        }
+      }
+
+      clientModule = requestUrl.startsWith('https') ? https : http;
+
       requestBody = JSON.stringify({
-        model: openaiModel,
+        model: modelName,
         messages: [
           { role: 'user', content: prompt }
         ]
@@ -389,29 +579,36 @@ Asegúrate de que la salida sea estrictamente Markdown limpio para poder ser gua
       options = {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
+          'Content-Type': 'application/json'
         }
       };
 
-      const req = https.request(url, options, (res) => {
+      if (apiKey) {
+        options.headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
+      const req = clientModule.request(requestUrl, options, (res) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
             if (parsed.error) {
-              return reject(new Error(parsed.error.message || 'Error en la API de OpenAI'));
+              const errMsg = parsed.error.message || (typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error));
+              return reject(new Error(errMsg || 'Error en el proveedor compatible con OpenAI'));
+            }
+            if (!parsed.choices || parsed.choices.length === 0 || !parsed.choices[0].message) {
+              return reject(new Error('Respuesta inválida del proveedor compatible con OpenAI. Data: ' + data));
             }
             const textResponse = parsed.choices[0].message.content;
             resolve(textResponse);
           } catch (e) {
-            reject(new Error('La respuesta de OpenAI no se pudo procesar: ' + e.message));
+            reject(new Error('La respuesta del proveedor de IA no se pudo procesar: ' + e.message + '\nData: ' + data));
           }
         });
       });
 
-      req.on('error', (e) => reject(e));
+      req.on('error', (e) => reject(new Error(`No se pudo conectar con el servidor de IA (${requestUrl}): ${e.message}`)));
       req.write(requestBody);
       req.end();
 
@@ -490,12 +687,13 @@ const server = http.createServer((req, res) => {
     req.on('end', async () => {
       try {
         const params = JSON.parse(body);
-        if (!params.prompt) {
+        if (!params.prompt && params.mode !== 'query_suggest') {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'El campo "prompt" es obligatorio.' }));
           return;
         }
-        if (params.provider !== 'ollama' && !params.apiKey) {
+        const requiresApiKey = ['gemini', 'openai'].includes(params.provider);
+        if (requiresApiKey && !params.apiKey) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'La API Key es obligatoria para proveedores Cloud.' }));
           return;
@@ -522,7 +720,8 @@ const server = http.createServer((req, res) => {
     req.on('end', async () => {
       try {
         const params = JSON.parse(body);
-        if (params.provider !== 'ollama' && !params.apiKey) {
+        const requiresApiKey = ['gemini', 'openai'].includes(params.provider);
+        if (requiresApiKey && !params.apiKey) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'La API Key es obligatoria para proveedores Cloud.' }));
           return;

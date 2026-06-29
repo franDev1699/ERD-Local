@@ -4,6 +4,7 @@ export class StateManager {
   constructor(initialState, onStateChange) {
     this.state = JSON.parse(JSON.stringify(initialState));
     this.state.groups = this.state.groups || [];
+    this.state.queries = this.state.queries || [];
     this.onStateChange = onStateChange;
   }
 
@@ -154,6 +155,27 @@ export class StateManager {
       this.state.groups = this.state.groups.filter(g => g.id !== groupId);
       this.notify();
     }
+  }
+
+  addQuery(query) {
+    if (!this.state.queries) this.state.queries = [];
+    this.state.queries.push(query);
+    this.notify();
+  }
+
+  updateQuery(queryId, updates) {
+    if (!this.state.queries) this.state.queries = [];
+    const index = this.state.queries.findIndex(q => q.id === queryId);
+    if (index !== -1) {
+      this.state.queries[index] = { ...this.state.queries[index], ...updates };
+      this.notify();
+    }
+  }
+
+  deleteQuery(queryId) {
+    if (!this.state.queries) this.state.queries = [];
+    this.state.queries = this.state.queries.filter(q => q.id !== queryId);
+    this.notify();
   }
 
   notify() {

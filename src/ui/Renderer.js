@@ -111,31 +111,55 @@ export class Renderer {
       const fromLeft = parseFloat(fromTableEl.style.left);
       const toLeft = parseFloat(toTableEl.style.left);
 
-      // Decide which ports to connect based on relative position
-      const useRightSource = fromLeft < toLeft;
+      // Table width is 240
+      const width = 240;
+      const fromRight = fromLeft + width;
+      const toRight = toLeft + width;
 
-      const fromPort = fromRow.querySelector(useRightSource ? ".port-right" : ".port-left");
-      const toPort = toRow.querySelector(useRightSource ? ".port-left" : ".port-right");
+      let fromPortType, toPortType;
+
+      if (fromRight < toLeft) {
+        // Table 1 is completely to the left of Table 2
+        fromPortType = "right";
+        toPortType = "left";
+      } else if (fromLeft > toRight) {
+        // Table 1 is completely to the right of Table 2
+        fromPortType = "left";
+        toPortType = "right";
+      } else {
+        // Horizontally overlapping / Vertically stacked
+        // Connect them on the same side to avoid crossing over/under the tables
+        if (fromLeft + width / 2 <= toLeft + width / 2) {
+          fromPortType = "right";
+          toPortType = "right";
+        } else {
+          fromPortType = "left";
+          toPortType = "left";
+        }
+      }
+
+      const fromPort = fromRow.querySelector(`.port-${fromPortType}`);
+      const toPort = toRow.querySelector(`.port-${toPortType}`);
 
       if (!fromPort || !toPort) return;
 
       const start = this.getPortCenter(fromPort);
       const end = this.getPortCenter(toPort);
 
-      this.drawRelationshipLine(start.x, start.y, end.x, end.y, useRightSource, rel.id);
+      this.drawRelationshipLine(start.x, start.y, end.x, end.y, fromPortType, toPortType, rel.id);
     });
   }
 
-  drawRelationshipLine(x1, y1, x2, y2, sourceIsLeftToRight, relationshipId) {
+  drawRelationshipLine(x1, y1, x2, y2, fromPortType, toPortType, relationshipId) {
     const { connectionsSvg } = this.elements;
     const glowPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
     const mainPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
 
-    // Calculate control points for smooth Bezier curve
+    // Calculate control points for smooth Bezier curve based on port types
     const dx = Math.abs(x2 - x1);
     const controlOffset = Math.max(50, dx / 1.7);
-    const cx1 = sourceIsLeftToRight ? x1 + controlOffset : x1 - controlOffset;
-    const cx2 = sourceIsLeftToRight ? x2 - controlOffset : x2 + controlOffset;
+    const cx1 = fromPortType === "right" ? x1 + controlOffset : x1 - controlOffset;
+    const cx2 = toPortType === "right" ? x2 + controlOffset : x2 - controlOffset;
 
     const d = `M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}`;
 

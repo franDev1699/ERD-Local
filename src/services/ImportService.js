@@ -31,8 +31,8 @@ export class ImportService {
         const newTable = {
           id: tableId,
           name: tableName,
-          x: 100, // Will be overridden by autoLayout
-          y: 100,
+          x: 1500, // Will be overridden by autoLayout
+          y: 1500,
           fields: []
         };
 

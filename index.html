@@ -82,6 +82,7 @@
 						<button id="btn-export-json" class="btn btn-toolbar" title="Descargar como JSON"><i data-lucide="download"></i> Exportar JSON</button>
 						<button id="btn-import-json-trigger" class="btn btn-toolbar" title="Cargar archivo JSON"><i data-lucide="upload"></i> Cargar JSON</button>
 						<button id="btn-import-sql-modal-trigger" class="btn btn-toolbar" title="Importar código SQL"><i data-lucide="database"></i> Importar SQL</button>
+						<button id="btn-query-manager-trigger" class="btn btn-toolbar" title="Administrar Consultas SQL con IA"><i data-lucide="terminal"></i> Consultas SQL</button>
 						<input type="file" id="input-import-json" accept=".json" style="display: none" />
 						<button id="btn-clear-all" class="btn btn-toolbar btn-danger-outline" title="Limpiar todo el diagrama"><i data-lucide="trash-2"></i> Limpiar Todo</button>
 					</div>
@@ -133,7 +134,19 @@
 						<button id="btn-zoom-out" class="btn-icon-toolbar" title="Alejar"><i data-lucide="zoom-out"></i></button>
 						<span id="zoom-level" class="zoom-text">100%</span>
 						<button id="btn-zoom-in" class="btn-icon-toolbar" title="Acercar"><i data-lucide="zoom-in"></i></button>
-						<button id="btn-auto-layout" class="btn-icon-toolbar" title="Organizar Tablas"><i data-lucide="layout-grid"></i></button>
+						<div class="toolbar-dropdown-container">
+							<button id="btn-auto-layout" class="btn-icon-toolbar" title="Organizar Tablas"><i data-lucide="layout-grid"></i></button>
+							<div id="layout-dropdown-menu" class="toolbar-dropdown-menu hidden">
+								<button id="btn-layout-normal" class="dropdown-item">
+									<i data-lucide="layout-grid"></i>
+									<span>Organizar normal</span>
+								</button>
+								<button id="btn-layout-ai" class="dropdown-item btn-ai-item">
+									<i data-lucide="sparkles"></i>
+									<span>Organizar con IA</span>
+								</button>
+							</div>
+						</div>
 						<button id="btn-undo" class="btn-icon-toolbar" title="Deshacer"><i data-lucide="undo-2"></i></button>
 						<button id="btn-redo" class="btn-icon-toolbar" title="Rehacer"><i data-lucide="redo-2"></i></button>
 					</div>
@@ -392,6 +405,9 @@
 									<option value="gemini">Gemini API (Recomendado)</option>
 									<option value="openai">OpenAI API</option>
 									<option value="ollama">Ollama (IA Local)</option>
+									<option value="vllm">vLLM Server</option>
+									<option value="litellm">LiteLLM Proxy</option>
+									<option value="custom-openai">OpenAI Compatible (Personalizado)</option>
 								</select>
 							</div>
 
@@ -412,6 +428,149 @@
 
 							<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px;">
 								<button id="btn-save-ai-config" class="btn btn-primary btn-full">Guardar Configuración</button>
+							</div>
+						</div>
+					</div>
+
+				</div>
+			</div>
+		</div>
+
+		<!-- SQL Query Manager Modal -->
+		<div id="query-modal" class="modal hidden">
+			<div class="modal-content query-modal-content" style="max-width: 900px; width: 95%; max-height: 90vh; display: flex; flex-direction: column; transition: max-width 0.3s ease;">
+				<div class="modal-header" style="flex-shrink: 0; padding: 12px 20px; border-bottom: 1px solid var(--color-border); display: flex; align-items: center; justify-content: space-between;">
+					<h2 style="display: flex; align-items: center; gap: 8px; margin: 0; font-size: 1.15rem;">
+						<i data-lucide="terminal" style="color: var(--color-primary); width: 18px; height: 18px;"></i>
+						Gestor de Consultas SQL con IA
+					</h2>
+					<button id="btn-close-query-modal" class="btn-icon"><i data-lucide="x"></i></button>
+				</div>
+				<div class="modal-body" style="display: flex; flex-direction: row !important; gap: 20px; flex: 1; min-height: 450px; height: 500px; padding: 0; overflow: hidden;">
+					
+					<!-- Left Column: Query Library List -->
+					<div class="query-sidebar" style="width: 220px; border-right: 1px solid var(--color-border); padding: 15px; display: flex; flex-direction: column; gap: 10px; flex-shrink: 0;">
+						<button id="btn-query-new" class="btn btn-primary btn-full" style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 0.85rem; padding: 8px;">
+							<i data-lucide="plus" style="width: 14px; height: 14px;"></i> Nueva Consulta
+						</button>
+						<div id="query-list-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
+							<!-- Dynamic queries list will be generated here -->
+						</div>
+					</div>
+
+					<!-- Main Editor Area (splits into 2 columns when results visible) -->
+					<div id="query-editor-pane" class="query-editor-pane" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0;">
+						<div id="query-editor-empty-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--color-text-muted); text-align: center; padding: 40px 20px;">
+							<i data-lucide="database" style="width: 48px; height: 48px; margin-bottom: 12px; color: var(--color-text-muted);"></i>
+							<p style="margin: 0; font-size: 0.9rem;">Selecciona una consulta de la biblioteca o crea una nueva para comenzar.</p>
+						</div>
+
+						<div id="query-editor-content" class="hidden" style="flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; height: 100%;">
+							<!-- Top bar: name + engine (Compact inline layout) -->
+							<div style="display: flex; gap: 15px; align-items: center; padding: 10px 15px 5px 15px; border-bottom: 1px solid rgba(255, 255, 255, 0.03); flex-shrink: 0;">
+								<div style="flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0;">
+									<label style="font-size: 0.8rem; color: var(--color-text-muted); white-space: nowrap;">Nombre:</label>
+									<input type="text" id="query-name-input" placeholder="ej: Obtener ventas del mes" style="flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-size: 0.85rem; min-width: 0;" />
+								</div>
+								<div style="display: flex; align-items: center; gap: 8px; width: 240px; flex-shrink: 0;">
+									<label style="font-size: 0.8rem; color: var(--color-text-muted); white-space: nowrap;">Motor:</label>
+									<select id="query-engine-select" style="flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-size: 0.85rem;">
+										<option value="postgres">PostgreSQL</option>
+										<option value="mariadb">MySQL / MariaDB</option>
+										<option value="sqlite">SQLite</option>
+										<option value="sqlserver">SQL Server</option>
+									</select>
+								</div>
+							</div>
+
+							<!-- 2-column area: SQL Editor (left) + Results Panel (right) -->
+							<div id="query-columns-wrapper" style="flex: 1; display: flex; gap: 15px; min-height: 0; overflow: hidden; padding: 10px 15px;">
+								
+								<!-- Left: SQL Editor + AI -->
+								<div id="query-editor-column" style="flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow: hidden;">
+									<div style="flex: 1; display: flex; flex-direction: column; min-height: 100px;">
+										<label style="display: block; font-size: 0.75rem; color: var(--color-text-muted); margin-bottom: 4px;">Código SQL:</label>
+										<textarea id="query-sql-textarea" placeholder="SELECT * FROM ..." style="flex: 1; width: 100%; font-family: monospace; font-size: 0.82rem; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); resize: none; line-height: 1.4; overflow-y: auto;"></textarea>
+									</div>
+
+									<!-- AI Assistant Box -->
+									<div style="background: rgba(139, 92, 246, 0.05); border: 1px dashed rgba(139, 92, 246, 0.3); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;">
+										<div style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 600; color: #a78bfa;">
+											<i data-lucide="sparkles" style="width: 14px; height: 14px;"></i> Asistente de Consultas con IA
+										</div>
+										<div style="display: flex; gap: 8px;">
+											<input type="text" id="query-prompt-input" placeholder="ej: Genera un JOIN entre usuarios y compras agrupado por mes..." style="flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-size: 0.85rem;" />
+											<button id="btn-query-ai-generate" class="btn btn-primary" style="background: linear-gradient(135deg, var(--color-primary) 0%, #8b5cf6 100%); border: none; font-size: 0.8rem; padding: 6px 12px; display: flex; align-items: center; gap: 4px;">
+												<i data-lucide="wand" style="width: 14px; height: 14px;"></i> Aplicar IA
+											</button>
+										</div>
+										<div id="query-ai-suggestions-container" style="display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem;">
+											<div style="display: flex; align-items: center; gap: 6px;">
+												<button id="btn-query-ai-suggest" class="btn" style="background: var(--color-bg-tertiary); border: 1px solid var(--color-border); padding: 4px 10px; border-radius: 4px; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; gap: 4px; font-size: 0.75rem;">
+													<i data-lucide="lightbulb" style="width: 12px; height: 12px; color: #f59e0b;"></i> Sugerir Consultas
+												</button>
+												<span id="query-suggestions-list" style="display: flex; gap: 6px; flex-wrap: wrap;"></span>
+											</div>
+										</div>
+									</div>
+
+									<!-- Action buttons -->
+									<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; flex-shrink: 0;">
+										<button id="btn-query-delete" class="btn btn-danger-outline" style="padding: 6px 12px; font-size: 0.85rem; display: flex; align-items: center; gap: 4px;">
+											<i data-lucide="trash-2" style="width: 14px; height: 14px;"></i> Eliminar
+										</button>
+										<div style="display: flex; gap: 8px; flex-wrap: wrap;">
+											<button id="btn-query-copy" class="btn btn-secondary" style="padding: 6px 10px; font-size: 0.8rem; display: flex; align-items: center; gap: 4px;">
+												<i data-lucide="copy" style="width: 13px; height: 13px;"></i> Copiar
+											</button>
+											<button id="btn-query-explain" class="btn" style="padding: 6px 10px; font-size: 0.8rem; display: flex; align-items: center; gap: 4px; background: linear-gradient(135deg, #818cf8, #6366f1); color: white; border: none;">
+												<i data-lucide="book-open" style="width: 13px; height: 13px;"></i> Explicar
+											</button>
+											<button id="btn-query-test" class="btn" style="padding: 6px 10px; font-size: 0.8rem; display: flex; align-items: center; gap: 4px; background: #059669; color: white; border: none;">
+												<i data-lucide="play" style="width: 13px; height: 13px;"></i> Probar
+											</button>
+											<button id="btn-query-save" class="btn btn-primary" style="padding: 6px 10px; font-size: 0.8rem; display: flex; align-items: center; gap: 4px;">
+												<i data-lucide="save" style="width: 13px; height: 13px;"></i> Guardar
+											</button>
+										</div>
+									</div>
+								</div>
+
+								<!-- Right: Results Panel (600px width with Tabs) -->
+								<div id="query-results-panel" class="hidden" style="width: 600px; flex-shrink: 0; border-left: 1px solid var(--color-border); padding-left: 15px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; min-height: 0;">
+									<div style="display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 6px;">
+										<!-- Tabs Bar -->
+										<div style="display: flex; gap: 4px;">
+											<button id="btn-tab-explain" class="query-tab-btn active" style="padding: 6px 12px; font-size: 0.8rem; font-weight: 600; border: 1px solid var(--color-border); border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; background: var(--color-bg-tertiary); color: var(--color-text); cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s;">
+												<i data-lucide="book-open" style="width: 12px; height: 12px;"></i> Explicación
+											</button>
+											<button id="btn-tab-test" class="query-tab-btn" style="padding: 6px 12px; font-size: 0.8rem; font-weight: 600; border: 1px solid transparent; border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; background: transparent; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s;">
+												<i data-lucide="play" style="width: 12px; height: 12px;"></i> Simulación
+											</button>
+										</div>
+										<button id="btn-close-results-panel" class="btn-icon" style="width: 24px; height: 24px; padding: 0; display: flex; align-items: center; justify-content: center;" title="Cerrar panel">
+											<i data-lucide="x" style="width: 14px; height: 14px;"></i>
+										</button>
+									</div>
+									
+									<!-- Tab Contents: Explain Container -->
+									<div id="query-tab-explain-content" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
+										<div id="query-explain-results" style="flex: 1; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: 6px; padding: 12px; font-size: 0.78rem; line-height: 1.55; color: var(--color-text); overflow-y: auto; white-space: pre-wrap; min-height: 0; max-height: 400px;">
+											<div style="color: var(--color-text-muted); font-style: italic; text-align: center; margin-top: 40px;">
+												Haz clic en "Explicar" para analizar esta consulta SQL con la IA.
+											</div>
+										</div>
+									</div>
+
+									<!-- Tab Contents: Test/Simulation Container (hidden by default) -->
+									<div id="query-tab-test-content" class="hidden" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
+										<div id="query-test-results" style="flex: 1; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: 6px; padding: 12px; font-family: monospace; font-size: 0.75rem; color: #10b981; overflow-y: auto; overflow-x: auto; min-height: 0; white-space: pre-wrap; max-height: 400px;">
+											<div style="color: var(--color-text-muted); font-style: italic; text-align: center; margin-top: 40px; font-family: sans-serif;">
+												Haz clic en "Probar" para simular la consulta con datos muestra del diagrama.
+											</div>
+										</div>
+									</div>
+								</div>
 							</div>
 						</div>
 					</div>

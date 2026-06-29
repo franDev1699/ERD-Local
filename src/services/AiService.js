@@ -34,7 +34,7 @@ export class AiService {
     }
   }
 
-  static async generate(prompt, currentState = null) {
+  static async generate(prompt, currentState = null, mode = 'replace', extraParams = {}) {
     const config = this.loadConfig();
     
     const payload = {
@@ -43,7 +43,9 @@ export class AiService {
       apiUrl: config.apiUrl,
       model: config.model,
       prompt: prompt,
-      currentState: currentState
+      currentState: currentState,
+      mode: mode,
+      ...extraParams
     };
 
     const response = await fetch('/api/ai/generate', {

@@ -86,9 +86,16 @@ export class AppController {
     this.selectedTableIds = new Set();
     this.selectedGroupId = null;
     this.myUser = null;
+    this.pendingProjectName = null;
   }
 
   async init() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const nameParam = urlParams.get('name');
+    if (nameParam) {
+      this.pendingProjectName = nameParam.trim();
+    }
+
     if (!this.projectId) {
       this.initDashboard();
       return;
@@ -124,12 +131,10 @@ export class AppController {
     await this.setupUserIdentity();
 
     // Check if there is a name param in URL for new local project initialization (fallback if offline)
-    const urlParams = new URLSearchParams(window.location.search);
-    const nameParam = urlParams.get('name');
-    if (nameParam) {
+    if (this.pendingProjectName) {
       const state = this.stateManager.getState();
       if (!state.name || state.name === 'Mi Diagrama Local') {
-        state.name = nameParam.trim();
+        state.name = this.pendingProjectName;
         this.stateManager.setState(state, false);
       }
       // Clean URL parameters without reloading
@@ -142,8 +147,16 @@ export class AppController {
     this.interactionController.init();
     this.setupGlobalEventListeners();
     this.setupSidebarResizer();
-    this.canvasManager.centerCanvas();
+    
+    // Si hay tablas, centrar vista en el contenido; si no, centrar canvas vacío
+    const initTables = this.stateManager.getState().tables;
+    if (initTables && initTables.length > 0) {
+      this.canvasManager.fitToContent(initTables);
+    } else {
+      this.canvasManager.centerCanvas();
+    }
     this.setupAiModal();
+    this.setupQueryManager();
   }
 
   setupSidebarResizer() {
@@ -196,10 +209,10 @@ export class AppController {
       if (data.payload) {
         if (data.payload.state) {
           let state = data.payload.state;
-          const urlParams = new URLSearchParams(window.location.search);
-          const nameParam = urlParams.get('name');
+          const nameParam = this.pendingProjectName;
           if (nameParam && (!state.name || state.name === 'Mi Diagrama Local')) {
-            state.name = nameParam.trim();
+            state.name = nameParam;
+            this.pendingProjectName = null; // Consume it
             // Clean up the URL to remove the name param so it looks nice and doesn't override future renames on refresh
             const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?project=${this.projectId}`;
             window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
@@ -245,6 +258,7 @@ export class AppController {
     }
     
     this.updateHistoryButtons();
+    this.renderQueriesList();
   }
 
   selectTable(tableId, isCumulative = false) {
@@ -707,6 +721,77 @@ export class AppController {
     }
   }
 
+  /**
+   * Centra todo el contenido (tablas y grupos) en el canvas 3000x3000.
+   * Calcula el bounding box y aplica un offset para que el centro del contenido
+   * coincida con el centro del canvas.
+   */
+  centerContentOnCanvas(tables, groups) {
+    const CANVAS_SIZE = 3000;
+    const CANVAS_CENTER = CANVAS_SIZE / 2;
+    const PADDING = 100;
+
+    // Calcular bounding box de todo el contenido
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
+    tables.forEach(table => {
+      minX = Math.min(minX, table.x);
+      maxX = Math.max(maxX, table.x + 240);
+      minY = Math.min(minY, table.y);
+      const tableHeight = 52 + (table.fields ? table.fields.length * 32 : 0) + 16;
+      maxY = Math.max(maxY, table.y + tableHeight);
+    });
+
+    if (groups && groups.length > 0) {
+      groups.forEach(group => {
+        minX = Math.min(minX, group.x);
+        maxX = Math.max(maxX, group.x + (group.width || 300));
+        minY = Math.min(minY, group.y);
+        maxY = Math.max(maxY, group.y + (group.height || 200));
+      });
+    }
+
+    if (!isFinite(minX)) return; // Sin contenido
+
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+    const contentCenterX = minX + contentWidth / 2;
+    const contentCenterY = minY + contentHeight / 2;
+
+    const dx = CANVAS_CENTER - contentCenterX;
+    const dy = CANVAS_CENTER - contentCenterY;
+
+    // Verificar que no se salga del canvas
+    const finalMinX = minX + dx;
+    const finalMinY = minY + dy;
+    const finalMaxX = maxX + dx;
+    const finalMaxY = maxY + dy;
+
+    // Ajustar si se desborda
+    let adjustX = 0, adjustY = 0;
+    if (finalMinX < PADDING) adjustX = PADDING - finalMinX;
+    if (finalMinY < PADDING) adjustY = PADDING - finalMinY;
+    if (finalMaxX > CANVAS_SIZE - PADDING) adjustX = (CANVAS_SIZE - PADDING) - finalMaxX;
+    if (finalMaxY > CANVAS_SIZE - PADDING) adjustY = (CANVAS_SIZE - PADDING) - finalMaxY;
+
+    const totalDx = dx + adjustX;
+    const totalDy = dy + adjustY;
+
+    if (Math.abs(totalDx) < 1 && Math.abs(totalDy) < 1) return; // Ya centrado
+
+    tables.forEach(table => {
+      table.x += totalDx;
+      table.y += totalDy;
+    });
+
+    if (groups && groups.length > 0) {
+      groups.forEach(group => {
+        group.x += totalDx;
+        group.y += totalDy;
+      });
+    }
+  }
+
   autoLayout() {
     const state = this.stateManager.getState();
     if (state.tables.length === 0) return;
@@ -714,24 +799,28 @@ export class AppController {
     this.history.push(JSON.parse(JSON.stringify(state)));
 
     const groups = state.groups || [];
+    const groupIds = new Set(groups.map(g => g.id));
 
     const estimateTableHeight = (table) => {
       const fieldCount = table.fields ? table.fields.length : 0;
-      // Header is approx 52px, each field is 32px, bottom padding is 16px
       return 52 + (fieldCount * 32) + 16;
     };
-    
-    // 1. Organize tables within each group
+
+    // 1. Organizar tablas dentro de cada grupo
     groups.forEach(group => {
       const groupTables = state.tables.filter(t => t.groupId === group.id);
-      if (groupTables.length === 0) return;
+      if (groupTables.length === 0) {
+        group.width = group.width || 300;
+        group.height = group.height || 200;
+        return;
+      }
 
       const paddingLeft = 40;
-      const paddingTop = 75; // More space for group title
+      const paddingTop = 75; // Espacio extra para el título del grupo
       const paddingRight = 40;
       const paddingBottom = 40;
-      const gapX = 60;
-      const gapY = 60;
+      const gapX = 80;
+      const gapY = 80;
       const tableWidth = 240;
       
       const colCount = Math.ceil(Math.sqrt(groupTables.length));
@@ -763,7 +852,7 @@ export class AppController {
         table.y = group.y + yOffset;
       });
 
-      // Expand the group size if there are more tables than fit
+      // Expandir el tamaño del grupo si contiene más tablas de las que caben
       const totalWidth = paddingLeft + colCount * tableWidth + (colCount - 1) * gapX + paddingRight;
       const totalHeight = paddingTop + rowHeights.reduce((sum, h) => sum + h, 0) + (rowCount - 1) * gapY + paddingBottom;
 
@@ -771,45 +860,96 @@ export class AppController {
       group.height = Math.max(group.height || 0, totalHeight);
     });
 
-    // 2. Globally organize groups first, then ungrouped tables
-    let currentX = 100;
-    let currentY = 100;
-    let maxRowHeight = 0;
+    // 2. Organizar grupos en una cuadrícula (grid) para evitar que se pongan uno sobre otro
+    let startX = 100;
+    let startY = 100;
+    let maxGroupsAreaHeight = 0;
+    let maxGroupsAreaWidth = 0;
 
-    // Arrange groups side-by-side
-    groups.forEach(group => {
-      const dx = currentX - group.x;
-      const dy = currentY - group.y;
+    if (groups.length > 0) {
+      const groupsColCount = Math.ceil(Math.sqrt(groups.length));
+      const groupsRowCount = Math.ceil(groups.length / groupsColCount);
+      const gapGroupsX = 150;
+      const gapGroupsY = 150;
 
-      group.x = currentX;
-      group.y = currentY;
+      // Calcular anchos máximos de columna de grupos y alturas máximas de fila de grupos
+      const colWidths = [];
+      const rowHeights = [];
 
-      // Shift all tables inside this group by the delta
-      state.tables.filter(t => t.groupId === group.id).forEach(table => {
-        table.x += dx;
-        table.y += dy;
+      for (let r = 0; r < groupsRowCount; r++) {
+        let maxRowH = 0;
+        for (let c = 0; c < groupsColCount; c++) {
+          const idx = r * groupsColCount + c;
+          if (idx < groups.length) {
+            maxRowH = Math.max(maxRowH, groups[idx].height || 200);
+          }
+        }
+        rowHeights.push(maxRowH);
+      }
+
+      for (let c = 0; c < groupsColCount; c++) {
+        let maxColW = 0;
+        for (let r = 0; r < groupsRowCount; r++) {
+          const idx = r * groupsColCount + c;
+          if (idx < groups.length) {
+            maxColW = Math.max(maxColW, groups[idx].width || 300);
+          }
+        }
+        colWidths.push(maxColW);
+      }
+
+      // Reposicionar grupos y trasladar sus tablas correspondientes
+      groups.forEach((group, index) => {
+        const col = index % groupsColCount;
+        const row = Math.floor(index / groupsColCount);
+
+        let targetX = startX;
+        for (let c = 0; c < col; c++) {
+          targetX += colWidths[c] + gapGroupsX;
+        }
+
+        let targetY = startY;
+        for (let r = 0; r < row; r++) {
+          targetY += rowHeights[r] + gapGroupsY;
+        }
+
+        const dx = targetX - group.x;
+        const dy = targetY - group.y;
+
+        group.x = targetX;
+        group.y = targetY;
+
+        // Desplazar tablas dentro de este grupo por la misma diferencia
+        state.tables.filter(t => t.groupId === group.id).forEach(table => {
+          table.x += dx;
+          table.y += dy;
+        });
       });
 
-      currentX += group.width + 120; // Generoso margen entre grupos
-      maxRowHeight = Math.max(maxRowHeight, group.height);
-    });
+      // Calcular las dimensiones totales ocupadas por los grupos
+      maxGroupsAreaWidth = colWidths.reduce((sum, w) => sum + w, 0) + (groupsColCount - 1) * gapGroupsX;
+      maxGroupsAreaHeight = rowHeights.reduce((sum, h) => sum + h, 0) + (groupsRowCount - 1) * gapGroupsY;
+    }
 
-    // Arrange ungrouped tables below the groups row
-    const ungroupedTables = state.tables.filter(t => !t.groupId);
+    // 3. Organizar tablas sin grupo (o con el groupId inválido) debajo del área de grupos
+    const ungroupedTables = state.tables.filter(t => !t.groupId || !groupIds.has(t.groupId));
     if (ungroupedTables.length > 0) {
+      let currentX = 100;
+      let currentY = 100;
+
       if (groups.length > 0) {
         currentX = 100;
-        currentY += maxRowHeight + 150; // Margen generoso debajo de los grupos
+        currentY = startY + maxGroupsAreaHeight + 200; // Colocar con margen generoso debajo del bloque de grupos
       }
 
       const colCount = Math.ceil(Math.sqrt(ungroupedTables.length));
       const rowCount = Math.ceil(ungroupedTables.length / colCount);
 
-      const gapX = 80;
-      const gapY = 80;
+      const gapX = 100;
+      const gapY = 100;
       const tableWidth = 240;
 
-      // Calcular la altura máxima de cada fila para tablas sin grupo
+      // Calcular alturas de fila para las tablas sin grupo
       const rowHeights = [];
       for (let r = 0; r < rowCount; r++) {
         let maxH = 0;
@@ -836,9 +976,104 @@ export class AppController {
       });
     }
 
+    // 4. Centrar todo el contenido en el canvas
+    this.centerContentOnCanvas(state.tables, state.groups);
+
     this.stateManager.notify();
     this.canvasManager.fitToContent(this.stateManager.getState().tables);
     this.uiManager.showToast("Tablas organizadas con éxito.", "success");
+  }
+
+  async autoLayoutWithAi() {
+    const state = this.stateManager.getState();
+    if (state.tables.length === 0) {
+      this.uiManager.showToast("No hay tablas para organizar.", "error");
+      return;
+    }
+
+    const config = AiService.loadConfig();
+    const requiresApiKey = ['gemini', 'openai'].includes(config.provider);
+    if (requiresApiKey && !config.apiKey) {
+      this.uiManager.showToast("Configura primero tu clave API en el Asistente (Configuración IA).", "error");
+      return;
+    }
+
+    const btnAutoLayout = document.getElementById("btn-auto-layout");
+    const originalHtml = btnAutoLayout ? btnAutoLayout.innerHTML : "";
+    if (btnAutoLayout) {
+      btnAutoLayout.disabled = true;
+      btnAutoLayout.innerHTML = `<span class="spinner-loader"></span>`;
+    }
+
+    this.uiManager.showToast("Organizando lienzo con IA...", "info");
+
+    try {
+      const layoutPrompt = "Organiza las posiciones de las tablas y grupos del diagrama actual de manera lógica, limpia y balanceada. Agrupa físicamente las tablas que tengan relaciones entre sí. Conserva los campos, nombres y relaciones existentes, y solo ajusta las posiciones (x, y) de las tablas y de los grupos, y las dimensiones (width, height) de los grupos.";
+      
+      const result = await AiService.generate(layoutPrompt, state, 'layout');
+
+      if (!result || !result.tables || !Array.isArray(result.tables)) {
+        throw new Error("El formato del resultado devuelto por la IA es inválido.");
+      }
+
+      // Mezclar ÚNICAMENTE coordenadas y pertenencia a grupos (groupId)
+      const updatedTables = state.tables.map(origTable => {
+        const aiTable = result.tables.find(t => t.id === origTable.id) || 
+                         result.tables.find(t => t.name.toLowerCase() === origTable.name.toLowerCase());
+        if (aiTable) {
+          return { 
+            ...origTable, 
+            x: aiTable.x !== undefined ? aiTable.x : origTable.x, 
+            y: aiTable.y !== undefined ? aiTable.y : origTable.y,
+            groupId: aiTable.groupId !== undefined ? aiTable.groupId : origTable.groupId
+          };
+        }
+        return origTable;
+      });
+
+      // Mezclar grupos (actualizar posiciones de los existentes, e incorporar nuevos si los sugiere la IA)
+      const updatedGroups = [...(state.groups || [])];
+      if (result.groups && Array.isArray(result.groups)) {
+        result.groups.forEach(aiGroup => {
+          const existingGroup = updatedGroups.find(g => g.id === aiGroup.id || g.name.toLowerCase() === aiGroup.name.toLowerCase());
+          if (existingGroup) {
+            existingGroup.x = aiGroup.x !== undefined ? aiGroup.x : existingGroup.x;
+            existingGroup.y = aiGroup.y !== undefined ? aiGroup.y : existingGroup.y;
+            existingGroup.width = aiGroup.width !== undefined ? aiGroup.width : existingGroup.width;
+            existingGroup.height = aiGroup.height !== undefined ? aiGroup.height : existingGroup.height;
+          } else {
+            updatedGroups.push({
+              id: aiGroup.id || `group-ai-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+              name: aiGroup.name,
+              color: aiGroup.color || "#374151",
+              x: aiGroup.x !== undefined ? aiGroup.x : 1500,
+              y: aiGroup.y !== undefined ? aiGroup.y : 1500,
+              width: aiGroup.width !== undefined ? aiGroup.width : 300,
+              height: aiGroup.height !== undefined ? aiGroup.height : 200
+            });
+          }
+        });
+      }
+
+      this.history.push(JSON.parse(JSON.stringify(state)));
+
+      this.stateManager.setState({
+        ...state,
+        tables: updatedTables,
+        groups: updatedGroups
+      });
+
+      this.canvasManager.fitToContent(updatedTables);
+      this.uiManager.showToast("Organizado con IA con éxito.", "success");
+    } catch (err) {
+      console.error("Error al organizar con IA:", err);
+      this.uiManager.showToast("La ordenación por IA falló: " + err.message, "error");
+    } finally {
+      if (btnAutoLayout) {
+        btnAutoLayout.disabled = false;
+        btnAutoLayout.innerHTML = originalHtml;
+      }
+    }
   }
 
   undo() {
@@ -1007,7 +1242,8 @@ export class AppController {
 
         // Cargar config y validar
         const config = AiService.loadConfig();
-        if (config.provider !== 'ollama' && !config.apiKey) {
+        const requiresApiKey = ['gemini', 'openai'].includes(config.provider);
+        if (requiresApiKey && !config.apiKey) {
           this.uiManager.showToast("Configura primero tu clave de API de IA.", "error");
           const modalAi = document.getElementById("ai-modal");
           if (modalAi) {
@@ -1323,8 +1559,35 @@ export class AppController {
     }
 
     const btnAutoLayout = document.getElementById("btn-auto-layout");
-    if (btnAutoLayout) {
-      btnAutoLayout.addEventListener("click", () => this.autoLayout());
+    const layoutDropdownMenu = document.getElementById("layout-dropdown-menu");
+    const btnLayoutNormal = document.getElementById("btn-layout-normal");
+    const btnLayoutAi = document.getElementById("btn-layout-ai");
+
+    if (btnAutoLayout && layoutDropdownMenu) {
+      btnAutoLayout.addEventListener("click", (e) => {
+        e.stopPropagation();
+        layoutDropdownMenu.classList.toggle("hidden");
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!layoutDropdownMenu.classList.contains("hidden") && !e.target.closest(".toolbar-dropdown-container")) {
+          layoutDropdownMenu.classList.add("hidden");
+        }
+      });
+    }
+
+    if (btnLayoutNormal) {
+      btnLayoutNormal.addEventListener("click", () => {
+        if (layoutDropdownMenu) layoutDropdownMenu.classList.add("hidden");
+        this.autoLayout();
+      });
+    }
+
+    if (btnLayoutAi) {
+      btnLayoutAi.addEventListener("click", () => {
+        if (layoutDropdownMenu) layoutDropdownMenu.classList.add("hidden");
+        this.autoLayoutWithAi();
+      });
     }
 
     // Undo / Redo buttons
@@ -1446,7 +1709,7 @@ export class AppController {
 
         card.addEventListener("click", (e) => {
           if (e.target.closest(".project-card-delete")) return;
-          window.location.search = `?project=${encodeURIComponent(project.id)}`;
+          window.open(`?project=${encodeURIComponent(project.id)}`, '_blank');
         });
 
         const btnDelete = card.querySelector(".project-card-delete");
@@ -1486,7 +1749,7 @@ export class AppController {
     const name = await this.uiManager.prompt("Nombre del nuevo proyecto:", "", "Nuevo Proyecto");
     if (name && name.trim()) {
       const projectId = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-      window.location.search = `?project=${encodeURIComponent(projectId)}&name=${encodeURIComponent(name.trim())}`;
+      window.open(`?project=${encodeURIComponent(projectId)}&name=${encodeURIComponent(name.trim())}`, '_blank');
     }
   }
 
@@ -1755,18 +2018,47 @@ export class AppController {
       const apiKeyGroup = document.getElementById("ai-apikey-group");
       const apiKeyLabel = apiKeyGroup ? apiKeyGroup.querySelector("label") : null;
       const apiKeyInput = document.getElementById("ai-apikey");
-      const apiUrlGroup = document.getElementById("ai-apiurl-group");
       
-      if (provider === 'ollama') {
-        if (apiKeyGroup) apiKeyGroup.classList.remove("hidden");
-        if (apiKeyLabel) apiKeyLabel.textContent = "API Key / Token (Opcional):";
-        if (apiKeyInput) apiKeyInput.placeholder = "Token de autorización (opcional)...";
-        if (apiUrlGroup) apiUrlGroup.classList.remove("hidden");
-      } else {
+      const apiUrlGroup = document.getElementById("ai-apiurl-group");
+      const apiUrlLabel = apiUrlGroup ? apiUrlGroup.querySelector("label") : null;
+      const apiUrlInput = document.getElementById("ai-apiurl");
+
+      if (provider === 'gemini' || provider === 'openai') {
         if (apiKeyGroup) apiKeyGroup.classList.remove("hidden");
         if (apiKeyLabel) apiKeyLabel.textContent = "API Key:";
         if (apiKeyInput) apiKeyInput.placeholder = "Ingresa tu clave de API...";
         if (apiUrlGroup) apiUrlGroup.classList.add("hidden");
+      } else {
+        // Local/Custom servers (Ollama, vLLM, LiteLLM, Custom OpenAI)
+        if (apiKeyGroup) apiKeyGroup.classList.remove("hidden");
+        if (apiKeyLabel) apiKeyLabel.textContent = "API Key / Token (Opcional):";
+        if (apiKeyInput) apiKeyInput.placeholder = "Token de autorización (opcional)...";
+        if (apiUrlGroup) apiUrlGroup.classList.remove("hidden");
+
+        if (apiUrlLabel) {
+          if (provider === 'ollama') {
+            apiUrlLabel.textContent = "URL de Ollama:";
+            if (apiUrlInput && (!apiUrlInput.value || apiUrlInput.value.includes('localhost:4000') || apiUrlInput.value.includes('localhost:8000') || apiUrlInput.value.includes('api.groq.com'))) {
+              apiUrlInput.value = "http://localhost:11434";
+            }
+          } else if (provider === 'vllm') {
+            apiUrlLabel.textContent = "URL de vLLM Server:";
+            if (apiUrlInput && (!apiUrlInput.value || apiUrlInput.value.includes('localhost:11434') || apiUrlInput.value.includes('localhost:4000') || apiUrlInput.value.includes('api.groq.com'))) {
+              apiUrlInput.value = "http://localhost:8000/v1";
+            }
+          } else if (provider === 'litellm') {
+            apiUrlLabel.textContent = "URL de LiteLLM Proxy:";
+            if (apiUrlInput && (!apiUrlInput.value || apiUrlInput.value.includes('localhost:11434') || apiUrlInput.value.includes('localhost:8000') || apiUrlInput.value.includes('api.groq.com'))) {
+              apiUrlInput.value = "http://localhost:4000";
+            }
+          } else if (provider === 'custom-openai') {
+            apiUrlLabel.textContent = "URL de Endpoint Compatible:";
+            if (apiUrlInput && (apiUrlInput.value.includes('localhost:'))) {
+              apiUrlInput.value = "";
+              apiUrlInput.placeholder = "e.g., https://api.groq.com/openai/v1";
+            }
+          }
+        }
       }
     }
 
@@ -1780,6 +2072,13 @@ export class AppController {
           inputModel.value = 'gpt-4o-mini';
         } else if (e.target.value === 'ollama') {
           inputModel.value = 'qwen2.5-coder';
+        } else if (e.target.value === 'vllm') {
+          inputModel.value = 'Qwen/Qwen2.5-Coder-7B-Instruct';
+        } else if (e.target.value === 'litellm') {
+          inputModel.value = 'qwen2.5-coder';
+        } else if (e.target.value === 'custom-openai') {
+          inputModel.value = '';
+          inputModel.placeholder = "ej: llama-3.1-8b-instant";
         }
       });
     }
@@ -1814,8 +2113,15 @@ export class AppController {
           apiUrl: inputApiUrl.value.trim()
         };
 
-        if (config.provider !== 'ollama' && !config.apiKey) {
+        const requiresApiKey = ['gemini', 'openai'].includes(config.provider);
+        if (requiresApiKey && !config.apiKey) {
           this.uiManager.showToast("La clave API es requerida para este proveedor.", "error");
+          return;
+        }
+
+        const requiresUrl = ['ollama', 'vllm', 'litellm', 'custom-openai'].includes(config.provider);
+        if (requiresUrl && !config.apiUrl) {
+          this.uiManager.showToast("La URL del servidor es requerida para este proveedor.", "error");
           return;
         }
 
@@ -1844,7 +2150,8 @@ export class AppController {
 
         // Cargar config y validar
         const config = AiService.loadConfig();
-        if (config.provider !== 'ollama' && !config.apiKey) {
+        const requiresApiKey = ['gemini', 'openai'].includes(config.provider);
+        if (requiresApiKey && !config.apiKey) {
           this.uiManager.showToast("Configura primero tu clave API en la pestaña de Configuración.", "error");
           switchTab("config");
           return;
@@ -1863,11 +2170,11 @@ export class AppController {
           const mode = selectMode ? selectMode.value : "replace";
           const currentState = this.stateManager.getState();
           
-          // Realizar llamada al proxy (pasamos el estado actual si no es modo reemplazar)
-          const result = await AiService.generate(prompt, mode !== 'replace' ? currentState : null);
+          // Realizar llamada al proxy (pasamos el estado actual si no es modo reemplazar, e incluimos el modo)
+          const result = await AiService.generate(prompt, mode !== 'replace' ? currentState : null, mode);
 
           if (!result || !result.tables || !Array.isArray(result.tables)) {
-            throw new Error("El JSON retornado por la IA no tiene el formato correcto.");
+            throw new Error("El JSON retornado por la IA no tiene el formato correcto o está vacío.");
           }
 
           // Guardar estado actual para deshacer
@@ -1890,6 +2197,7 @@ export class AppController {
             const newTables = [];
             const tableIdMap = {};
             const fieldIdMap = {};
+            const processedOriginalTableIds = new Set();
 
             result.tables.forEach(aiTable => {
               // Buscar tabla original coincidente por ID o por nombre (case-insensitive)
@@ -1898,6 +2206,9 @@ export class AppController {
 
               const finalTableId = originalTable ? originalTable.id : (aiTable.id || `tbl-ai-${Date.now()}-${Math.floor(Math.random() * 1000)}`);
               tableIdMap[aiTable.id] = finalTableId;
+              if (originalTable) {
+                processedOriginalTableIds.add(originalTable.id);
+              }
 
               // Mezclar campos
               const finalFields = [];
@@ -1930,13 +2241,29 @@ export class AppController {
                 id: finalTableId,
                 name: aiTable.name,
                 // Preservar coordenadas originales si existen
-                x: originalTable ? originalTable.x : (aiTable.x !== undefined ? aiTable.x : 100),
-                y: originalTable ? originalTable.y : (aiTable.y !== undefined ? aiTable.y : 100),
+                x: originalTable ? originalTable.x : (aiTable.x !== undefined ? aiTable.x : 1500),
+                y: originalTable ? originalTable.y : (aiTable.y !== undefined ? aiTable.y : 1500),
                 fields: finalFields,
                 color: aiTable.color || (originalTable ? originalTable.color : "#6366f1"),
                 groupId: aiTable.groupId || (originalTable ? originalTable.groupId : null)
               });
             });
+
+            // Conservar tablas que no devolvió la IA, excepto si el prompt indica borrado explícito de tablas
+            const isDeleteAction = /delete|remove|elimina|borra|quita/i.test(prompt);
+            if (!isDeleteAction) {
+              currentTables.forEach(origTable => {
+                if (!processedOriginalTableIds.has(origTable.id)) {
+                  newTables.push(origTable);
+                  tableIdMap[origTable.id] = origTable.id;
+                  if (origTable.fields) {
+                    origTable.fields.forEach(f => {
+                      fieldIdMap[f.id] = f.id;
+                    });
+                  }
+                }
+              });
+            }
 
             // Mezclar grupos
             const newGroups = [];
@@ -1958,11 +2285,20 @@ export class AppController {
                   id: finalGroupId,
                   name: aiGroup.name,
                   color: aiGroup.color || (originalGroup ? originalGroup.color : "#374151"),
-                  x: originalGroup ? originalGroup.x : (aiGroup.x !== undefined ? aiGroup.x : 100),
-                  y: originalGroup ? originalGroup.y : (aiGroup.y !== undefined ? aiGroup.y : 100),
+                  x: originalGroup ? originalGroup.x : (aiGroup.x !== undefined ? aiGroup.x : 1500),
+                  y: originalGroup ? originalGroup.y : (aiGroup.y !== undefined ? aiGroup.y : 1500),
                   width: originalGroup ? originalGroup.width : (aiGroup.width !== undefined ? aiGroup.width : 300),
                   height: originalGroup ? originalGroup.height : (aiGroup.height !== undefined ? aiGroup.height : 200)
                 });
+              });
+            }
+
+            // Agregar grupos que no fueron devueltos por la IA (si no es acción de borrado)
+            if (!isDeleteAction) {
+              currentGroups.forEach(origGroup => {
+                if (!newGroups.some(ng => ng.id === origGroup.id)) {
+                  newGroups.push(origGroup);
+                }
               });
             }
 
@@ -1995,6 +2331,24 @@ export class AppController {
               });
             }
 
+            // Conservar relaciones originales que no fueron redefinidas por la IA si ambas tablas aún existen
+            currentRelationships.forEach(origRel => {
+              const isRedefined = result.relationships && result.relationships.some(rel => {
+                const mappedFromTable = tableIdMap[rel.fromTable] || rel.fromTable;
+                const mappedToTable = tableIdMap[rel.toTable] || rel.toTable;
+                return (mappedFromTable === origRel.fromTable && mappedToTable === origRel.toTable) ||
+                       (mappedFromTable === origRel.toTable && mappedToTable === origRel.fromTable);
+              });
+
+              if (!isRedefined) {
+                const fromExists = newTables.some(t => t.id === origRel.fromTable);
+                const toExists = newTables.some(t => t.id === origRel.toTable);
+                if (fromExists && toExists) {
+                  newRelationships.push(origRel);
+                }
+              }
+            });
+
             this.stateManager.setState({
               tables: newTables,
               relationships: newRelationships,
@@ -2002,12 +2356,11 @@ export class AppController {
             });
             this.uiManager.showToast("Diagrama modificado con IA con éxito.", "success");
           } else {
-            // Combinar estados (modo append)
+            // Combinar estados (modo append / Agregar tablas)
             const currentTables = [...currentState.tables];
             const currentRelationships = [...currentState.relationships];
             const currentGroups = [...(currentState.groups || [])];
 
-            // Evitar duplicaciones de IDs
             const tableIdMap = {};
             const fieldIdMap = {};
 
@@ -2126,5 +2479,656 @@ export class AppController {
         }
       });
     }
+  }
+
+  setupQueryManager() {
+    this.activeQueryId = null;
+    
+    const btnTrigger = document.getElementById("btn-query-manager-trigger");
+    const modal = document.getElementById("query-modal");
+    const btnClose = document.getElementById("btn-close-query-modal");
+    const btnNew = document.getElementById("btn-query-new");
+    const btnSave = document.getElementById("btn-query-save");
+    const btnDelete = document.getElementById("btn-query-delete");
+    const btnCopy = document.getElementById("btn-query-copy");
+    const btnTest = document.getElementById("btn-query-test");
+    const btnAiGenerate = document.getElementById("btn-query-ai-generate");
+    const btnAiSuggest = document.getElementById("btn-query-ai-suggest");
+    const btnExplain = document.getElementById("btn-query-explain");
+    const resultsPanel = document.getElementById("query-results-panel");
+    const btnCloseResultsPanel = document.getElementById("btn-close-results-panel");
+    const modalContent = modal ? modal.querySelector(".query-modal-content") : null;
+
+    if (btnCloseResultsPanel) {
+      btnCloseResultsPanel.addEventListener("click", () => this.hideQueryResultsPanel());
+    }
+
+    const tabExplainBtn = document.getElementById("btn-tab-explain");
+    const tabTestBtn = document.getElementById("btn-tab-test");
+
+    if (tabExplainBtn) {
+      tabExplainBtn.addEventListener("click", () => this.switchQueryTab('explain'));
+    }
+    if (tabTestBtn) {
+      tabTestBtn.addEventListener("click", () => this.switchQueryTab('test'));
+    }
+
+    // Trigger open
+    if (btnTrigger) {
+      btnTrigger.addEventListener("click", () => {
+        this.selectQuery(null);
+        modal.classList.remove("hidden");
+        this.renderQueriesList();
+      });
+    }
+
+    // Close
+    if (btnClose) {
+      btnClose.addEventListener("click", () => {
+        modal.classList.add("hidden");
+        this.hideQueryResultsPanel();
+      });
+    }
+
+    // New Query
+    if (btnNew) {
+      btnNew.addEventListener("click", () => {
+        const id = `query-${Date.now()}`;
+        const newQ = {
+          id: id,
+          name: `Nueva Consulta ${this.stateManager.getState().queries ? this.stateManager.getState().queries.length + 1 : 1}`,
+          dbEngine: "postgres",
+          sql: "-- Escribe tu consulta SQL aquí\nSELECT * FROM "
+        };
+        this.stateManager.addQuery(newQ);
+        this.selectQuery(id);
+      });
+    }
+
+    // Save Query
+    if (btnSave) {
+      btnSave.addEventListener("click", () => {
+        if (!this.activeQueryId) return;
+        const nameInput = document.getElementById("query-name-input");
+        const engineSelect = document.getElementById("query-engine-select");
+        const sqlTextarea = document.getElementById("query-sql-textarea");
+
+        const name = nameInput ? nameInput.value.trim() : "";
+        const engine = engineSelect ? engineSelect.value : "postgres";
+        const sql = sqlTextarea ? sqlTextarea.value : "";
+
+        this.stateManager.updateQuery(this.activeQueryId, {
+          name: name || "Consulta sin nombre",
+          dbEngine: engine,
+          sql: sql
+        });
+
+        this.uiManager.showToast("Consulta SQL guardada.", "success");
+        this.renderQueriesList();
+      });
+    }
+
+    // Delete Query
+    if (btnDelete) {
+      btnDelete.addEventListener("click", async () => {
+        if (!this.activeQueryId) return;
+        const confirmDelete = await this.uiManager.confirm("¿Seguro que deseas eliminar esta consulta?");
+        if (confirmDelete) {
+          this.stateManager.deleteQuery(this.activeQueryId);
+          this.uiManager.showToast("Consulta eliminada.", "success");
+          this.selectQuery(null);
+        }
+      });
+    }
+
+    // Copy SQL to clipboard (with fallback for non-HTTPS)
+    if (btnCopy) {
+      btnCopy.addEventListener("click", () => {
+        const sqlTextarea = document.getElementById("query-sql-textarea");
+        if (!sqlTextarea || !sqlTextarea.value.trim()) return;
+        
+        const textToCopy = sqlTextarea.value;
+        
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(textToCopy)
+            .then(() => this.uiManager.showToast("SQL copiado al portapapeles.", "success"))
+            .catch(() => this.copyFallback(textToCopy));
+        } else {
+          this.copyFallback(textToCopy);
+        }
+      });
+    }
+
+    // Test (Simulate) Query on Mock Data
+    if (btnTest) {
+      btnTest.addEventListener("click", () => {
+        const sqlTextarea = document.getElementById("query-sql-textarea");
+        const resultsDiv = document.getElementById("query-test-results");
+
+        if (!sqlTextarea || !resultsDiv) return;
+
+        const sql = sqlTextarea.value.trim();
+        if (!sql) {
+          this.uiManager.showToast("Escribe primero una consulta SELECT para probar.", "error");
+          return;
+        }
+
+        const state = this.stateManager.getState();
+        const simResult = this.simulateQuery(sql, state.tables);
+
+        this.showQueryResultsPanel("Resultado de Simulación (Datos Muestra):");
+        this.switchQueryTab('test');
+
+        if (!simResult.success) {
+          resultsDiv.style.color = "#ef4444";
+          resultsDiv.textContent = `Error de simulación: ${simResult.error}`;
+          return;
+        }
+
+        // Render mock rows as a nice HTML/ASCII table
+        resultsDiv.style.color = "#10b981";
+        resultsDiv.innerHTML = ""; // Clear
+        
+        const titleEl = document.createElement("div");
+        titleEl.style.fontWeight = "bold";
+        titleEl.style.marginBottom = "6px";
+        titleEl.textContent = `Simulado con éxito usando tablas: ${simResult.tables.join(", ")}`;
+        resultsDiv.appendChild(titleEl);
+
+        const tableEl = document.createElement("table");
+        tableEl.style.width = "100%";
+        tableEl.style.borderCollapse = "collapse";
+        tableEl.style.marginTop = "6px";
+        tableEl.style.border = "1px solid var(--color-border)";
+
+        // Table Header
+        const thead = document.createElement("thead");
+        const headerRow = document.createElement("tr");
+        headerRow.style.background = "rgba(16, 185, 129, 0.1)";
+        
+        const keys = Object.keys(simResult.rows[0]);
+        keys.forEach(k => {
+          const th = document.createElement("th");
+          th.style.padding = "6px 8px";
+          th.style.border = "1px solid var(--color-border)";
+          th.style.textAlign = "left";
+          th.textContent = k;
+          headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        tableEl.appendChild(thead);
+
+        // Table Body
+        const tbody = document.createElement("tbody");
+        simResult.rows.forEach(row => {
+          const tr = document.createElement("tr");
+          keys.forEach(k => {
+            const td = document.createElement("td");
+            td.style.padding = "6px 8px";
+            td.style.border = "1px solid var(--color-border)";
+            td.textContent = row[k];
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+        tableEl.appendChild(tbody);
+        resultsDiv.appendChild(tableEl);
+      });
+    }
+
+    // AI Generate SQL Query
+    if (btnAiGenerate) {
+      btnAiGenerate.addEventListener("click", async () => {
+        const promptInput = document.getElementById("query-prompt-input");
+        const sqlTextarea = document.getElementById("query-sql-textarea");
+        const engineSelect = document.getElementById("query-engine-select");
+        const nameInput = document.getElementById("query-name-input");
+
+        if (!promptInput || !sqlTextarea) return;
+
+        const prompt = promptInput.value.trim();
+        if (!prompt) {
+          this.uiManager.showToast("Por favor describe lo que necesitas generar con la IA.", "error");
+          return;
+        }
+
+        // Cargar config y validar
+        const config = AiService.loadConfig();
+        const requiresApiKey = ['gemini', 'openai'].includes(config.provider);
+        if (requiresApiKey && !config.apiKey) {
+          this.uiManager.showToast("Configura primero tu clave API en la pestaña de Configuración.", "error");
+          return;
+        }
+
+        btnAiGenerate.disabled = true;
+        const originalText = btnAiGenerate.innerHTML;
+        btnAiGenerate.innerHTML = `<span class="spinner-loader"></span> Generando...`;
+
+        try {
+          const state = this.stateManager.getState();
+          const engine = engineSelect ? engineSelect.value : "postgres";
+          const currentSql = sqlTextarea.value.trim();
+
+          const result = await AiService.generate(prompt, state, 'query_generate', {
+            engine: engine,
+            currentQuerySql: currentSql
+          });
+
+          if (result.sql) {
+            sqlTextarea.value = result.sql;
+            if (nameInput && result.name && (!nameInput.value.trim() || nameInput.value.startsWith("Nueva Consulta"))) {
+              nameInput.value = result.name;
+            }
+            this.uiManager.showToast("SQL generado con IA exitosamente.", "success");
+            
+            // Auto save in state
+            this.stateManager.updateQuery(this.activeQueryId, {
+              name: (nameInput ? nameInput.value.trim() : "") || result.name || "Consulta IA",
+              dbEngine: engine,
+              sql: result.sql
+            });
+            this.renderQueriesList();
+          } else {
+            throw new Error("No se pudo obtener el código SQL generado.");
+          }
+        } catch (err) {
+          console.error("Error al generar consulta con IA:", err);
+          this.uiManager.showToast(`Error de IA: ${err.message}`, "error");
+        } finally {
+          btnAiGenerate.disabled = false;
+          btnAiGenerate.innerHTML = originalText;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+
+    // AI Suggest Queries
+    if (btnAiSuggest) {
+      btnAiSuggest.addEventListener("click", async () => {
+        const suggestionsList = document.getElementById("query-suggestions-list");
+        if (!suggestionsList) return;
+
+        // Cargar config y validar
+        const config = AiService.loadConfig();
+        const requiresApiKey = ['gemini', 'openai'].includes(config.provider);
+        if (requiresApiKey && !config.apiKey) {
+          this.uiManager.showToast("Configura primero tu clave API en la pestaña de Configuración.", "error");
+          return;
+        }
+
+        btnAiSuggest.disabled = true;
+        const originalText = btnAiSuggest.innerHTML;
+        btnAiSuggest.innerHTML = `<i data-lucide="loader" class="animate-spin" style="width: 12px; height: 12px; margin-right: 4px;"></i> Sugiriendo...`;
+        if (window.lucide) window.lucide.createIcons();
+
+        try {
+          const state = this.stateManager.getState();
+          
+          const result = await AiService.generate("sugerir", state, 'query_suggest');
+
+          suggestionsList.innerHTML = ""; // Clear
+          
+          if (Array.isArray(result)) {
+            result.forEach(s => {
+              const pill = document.createElement("button");
+              pill.className = "quick-prompt-chip";
+              pill.style.padding = "4px 8px";
+              pill.style.borderRadius = "12px";
+              pill.style.border = "1px solid var(--color-border)";
+              pill.style.background = "var(--color-bg-app)";
+              pill.style.color = "var(--color-text-muted)";
+              pill.style.fontSize = "0.7rem";
+              pill.style.cursor = "pointer";
+              pill.style.transition = "all 0.2s";
+              pill.textContent = s.name;
+              pill.title = s.prompt;
+
+              pill.addEventListener("click", () => {
+                const promptInput = document.getElementById("query-prompt-input");
+                if (promptInput) {
+                  promptInput.value = s.prompt;
+                  promptInput.focus();
+                }
+              });
+
+              suggestionsList.appendChild(pill);
+            });
+          } else {
+            throw new Error("Formato de respuesta de sugerencias inválido.");
+          }
+        } catch (err) {
+          console.error("Error al sugerir consultas con IA:", err);
+          this.uiManager.showToast(`Error de IA: ${err.message}`, "error");
+        } finally {
+          btnAiSuggest.disabled = false;
+          btnAiSuggest.innerHTML = originalText;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+
+    // Explain Query with AI
+    if (btnExplain) {
+      btnExplain.addEventListener("click", async () => {
+        const sqlTextarea = document.getElementById("query-sql-textarea");
+        const explainDiv = document.getElementById("query-explain-results");
+        const engineSelect = document.getElementById("query-engine-select");
+
+        if (!sqlTextarea || !explainDiv) return;
+
+        const sql = sqlTextarea.value.trim();
+        if (!sql) {
+          this.uiManager.showToast("Escribe primero una consulta SQL para explicar.", "error");
+          return;
+        }
+
+        const config = AiService.loadConfig();
+        const requiresApiKey = ['gemini', 'openai'].includes(config.provider);
+        if (requiresApiKey && !config.apiKey) {
+          this.uiManager.showToast("Configura primero tu clave API en la pestaña de Configuración.", "error");
+          return;
+        }
+
+        btnExplain.disabled = true;
+        const originalText = btnExplain.innerHTML;
+        btnExplain.innerHTML = `<span class="spinner-loader"></span> Explicando...`;
+
+        try {
+          const state = this.stateManager.getState();
+          const engine = engineSelect ? engineSelect.value : "postgres";
+
+          const result = await AiService.generate(sql, state, 'query_explain', { engine });
+
+          this.showQueryResultsPanel();
+          this.switchQueryTab('explain');
+          explainDiv.style.color = "var(--color-text)";
+          explainDiv.innerHTML = "";
+
+          const titleEl = document.createElement("div");
+          titleEl.style.fontWeight = "bold";
+          titleEl.style.marginBottom = "8px";
+          titleEl.style.color = "#818cf8";
+          titleEl.innerHTML = `<i data-lucide="book-open" style="width: 14px; height: 14px; display: inline; vertical-align: middle; margin-right: 4px;"></i> Explicación de la Consulta`;
+          explainDiv.appendChild(titleEl);
+
+          const explanationText = typeof result === 'string' ? result : (result.explanation || JSON.stringify(result));
+          
+          // Render explanation as formatted text
+          const contentEl = document.createElement("div");
+          contentEl.style.whiteSpace = "pre-wrap";
+          contentEl.style.lineHeight = "1.6";
+          contentEl.style.fontSize = "0.8rem";
+          contentEl.textContent = explanationText;
+          explainDiv.appendChild(contentEl);
+
+          if (window.lucide) window.lucide.createIcons();
+          this.uiManager.showToast("Consulta explicada con IA.", "success");
+        } catch (err) {
+          console.error("Error al explicar consulta con IA:", err);
+          this.showQueryResultsPanel();
+          this.switchQueryTab('explain');
+          explainDiv.innerHTML = `<div style="padding: 12px; background: rgba(239, 68, 68, 0.08); border-radius: 6px; border: 1px solid rgba(239, 68, 68, 0.2); color: #fca5a5; line-height: 1.5; font-family: sans-serif; font-size: 0.8rem;">
+            <strong style="color: #ef4444; display: block; margin-bottom: 4px;">No se pudo generar la explicación</strong>
+            El proveedor de IA no pudo responder o devolvió un formato inválido. Por favor, asegúrate de que la consulta sea correcta e intenta de nuevo.
+          </div>`;
+          this.uiManager.showToast("No se pudo obtener la explicación de la IA.", "error");
+        } finally {
+          btnExplain.disabled = false;
+          btnExplain.innerHTML = originalText;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+  }
+
+  /**
+   * Fallback para copiar al portapapeles cuando navigator.clipboard no está disponible
+   * (contextos no HTTPS o navegadores sin soporte).
+   */
+  copyFallback(text) {
+    try {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-9999px";
+      textArea.style.top = "-9999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      this.uiManager.showToast("SQL copiado al portapapeles.", "success");
+    } catch (err) {
+      this.uiManager.showToast("Error al copiar al portapapeles.", "error");
+    }
+  }
+
+  simulateQuery(sql, tables) {
+    const sqlUpper = sql.toUpperCase();
+    if (!sqlUpper.includes("SELECT")) {
+      return { success: false, error: "Actualmente solo se simula la ejecución de sentencias SELECT para pruebas." };
+    }
+    
+    // Find matched tables
+    const matchedTables = tables.filter(t => {
+      const regex = new RegExp(`\\b${t.name}\\b`, "i");
+      return regex.test(sql);
+    });
+    
+    if (matchedTables.length === 0) {
+      return { success: false, error: "No se encontraron tablas del diagrama referenciadas en la consulta SQL." };
+    }
+    
+    let columns = [];
+    matchedTables.forEach(t => {
+      t.fields.forEach(f => {
+        columns.push({
+          tableName: t.name,
+          fieldName: f.name,
+          type: f.type,
+          isPK: f.isPK
+        });
+      });
+    });
+    
+    const mockRows = [];
+    for (let i = 1; i <= 3; i++) {
+      const row = {};
+      columns.forEach(col => {
+        let val = "";
+        const typeUpper = col.type.toUpperCase();
+        if (typeUpper.includes("INT")) {
+          val = col.isPK ? i : Math.floor(Math.random() * 100) + 1;
+        } else if (typeUpper.includes("VARCHAR") || typeUpper.includes("TEXT")) {
+          val = `${col.fieldName}_val_${i}`;
+        } else if (typeUpper.includes("DECIMAL") || typeUpper.includes("FLOAT") || typeUpper.includes("DOUBLE")) {
+          val = (Math.random() * 100).toFixed(2);
+        } else if (typeUpper.includes("DATE") || typeUpper.includes("TIME")) {
+          val = new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        } else if (typeUpper.includes("BOOL") || typeUpper.includes("TINYINT")) {
+          val = Math.random() > 0.5 ? "true" : "false";
+        } else {
+          val = `val_${i}`;
+        }
+        row[col.fieldName] = val;
+      });
+      mockRows.push(row);
+    }
+    
+    return { success: true, rows: mockRows, tables: matchedTables.map(t => t.name) };
+  }
+
+  selectQuery(queryId) {
+    this.activeQueryId = queryId;
+    this.renderQueriesList();
+
+    const emptyState = document.getElementById("query-editor-empty-state");
+    const content = document.getElementById("query-editor-content");
+    const resultsDiv = document.getElementById("query-test-results");
+
+    const explainDiv = document.getElementById("query-explain-results");
+    const testDiv = document.getElementById("query-test-results");
+
+    this.hideQueryResultsPanel();
+    this.switchQueryTab('explain');
+    if (explainDiv) {
+      explainDiv.innerHTML = `<div style="color: var(--color-text-muted); font-style: italic; text-align: center; margin-top: 40px;">
+        Haz clic en "Explicar" para analizar esta consulta SQL con la IA.
+      </div>`;
+    }
+    if (testDiv) {
+      testDiv.innerHTML = `<div style="color: var(--color-text-muted); font-style: italic; text-align: center; margin-top: 40px; font-family: sans-serif;">
+        Haz clic en "Probar" para simular la consulta con datos muestra del diagrama.
+      </div>`;
+    }
+
+    if (!queryId) {
+      if (emptyState) {
+        emptyState.style.display = "flex";
+        emptyState.classList.remove("hidden");
+      }
+      if (content) {
+        content.style.display = "none";
+        content.classList.add("hidden");
+      }
+      return;
+    }
+
+    if (emptyState) {
+      emptyState.style.display = "none";
+      emptyState.classList.add("hidden");
+    }
+    if (content) {
+      content.style.display = "flex";
+      content.classList.remove("hidden");
+    }
+
+    const queries = this.stateManager.getState().queries || [];
+    const q = queries.find(item => item.id === queryId);
+    if (q) {
+      const nameInput = document.getElementById("query-name-input");
+      const engineSelect = document.getElementById("query-engine-select");
+      const sqlTextarea = document.getElementById("query-sql-textarea");
+      const promptInput = document.getElementById("query-prompt-input");
+      const suggestionsList = document.getElementById("query-suggestions-list");
+
+      if (nameInput) nameInput.value = q.name || "";
+      if (engineSelect) engineSelect.value = q.dbEngine || "postgres";
+      if (sqlTextarea) sqlTextarea.value = q.sql || "";
+      if (promptInput) promptInput.value = "";
+      if (suggestionsList) suggestionsList.innerHTML = "";
+    }
+  }
+
+  showQueryResultsPanel() {
+    const resultsPanel = document.getElementById("query-results-panel");
+    const modal = document.getElementById("query-modal");
+    const modalContent = modal ? modal.querySelector(".query-modal-content") : null;
+    if (resultsPanel) {
+      resultsPanel.classList.remove("hidden");
+      resultsPanel.style.display = "flex";
+    }
+    if (modalContent) modalContent.style.maxWidth = "1480px";
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  hideQueryResultsPanel() {
+    const resultsPanel = document.getElementById("query-results-panel");
+    const modal = document.getElementById("query-modal");
+    const modalContent = modal ? modal.querySelector(".query-modal-content") : null;
+    if (resultsPanel) {
+      resultsPanel.classList.add("hidden");
+      resultsPanel.style.display = "none";
+    }
+    if (modalContent) modalContent.style.maxWidth = "900px";
+  }
+
+  switchQueryTab(tabName) {
+    const tabExplain = document.getElementById("btn-tab-explain");
+    const tabTest = document.getElementById("btn-tab-test");
+    const explainContent = document.getElementById("query-tab-explain-content");
+    const testContent = document.getElementById("query-tab-test-content");
+
+    if (!tabExplain || !tabTest || !explainContent || !testContent) return;
+
+    if (tabName === 'explain') {
+      tabExplain.style.background = "var(--color-bg-tertiary)";
+      tabExplain.style.borderColor = "var(--color-border)";
+      tabExplain.style.color = "var(--color-text)";
+      
+      tabTest.style.background = "transparent";
+      tabTest.style.borderColor = "transparent";
+      tabTest.style.color = "var(--color-text-muted)";
+
+      explainContent.classList.remove("hidden");
+      explainContent.style.display = "flex";
+      testContent.classList.add("hidden");
+      testContent.style.display = "none";
+    } else {
+      tabTest.style.background = "var(--color-bg-tertiary)";
+      tabTest.style.borderColor = "var(--color-border)";
+      tabTest.style.color = "var(--color-text)";
+
+      tabExplain.style.background = "transparent";
+      tabExplain.style.borderColor = "transparent";
+      tabExplain.style.color = "var(--color-text-muted)";
+
+      testContent.classList.remove("hidden");
+      testContent.style.display = "flex";
+      explainContent.classList.add("hidden");
+      explainContent.style.display = "none";
+    }
+  }
+
+  renderQueriesList() {
+    const container = document.getElementById("query-list-container");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const queries = this.stateManager.getState().queries || [];
+    if (queries.length === 0) {
+      container.innerHTML = `<div style="text-align: center; color: var(--color-text-muted); font-size: 0.8rem; padding: 10px;">Sin consultas guardadas</div>`;
+      return;
+    }
+
+    queries.forEach(q => {
+      const btn = document.createElement("button");
+      btn.className = "query-item-btn";
+      btn.style.width = "100%";
+      btn.style.padding = "8px 10px";
+      btn.style.borderRadius = "6px";
+      btn.style.border = "1px solid var(--color-border)";
+      btn.style.background = this.activeQueryId === q.id ? "var(--color-primary-light, rgba(99, 102, 241, 0.1))" : "var(--color-bg-tertiary)";
+      btn.style.borderColor = this.activeQueryId === q.id ? "var(--color-primary)" : "var(--color-border)";
+      btn.style.color = this.activeQueryId === q.id ? "var(--color-text-main)" : "var(--color-text-muted)";
+      btn.style.textAlign = "left";
+      btn.style.cursor = "pointer";
+      btn.style.display = "flex";
+      btn.style.justifyContent = "space-between";
+      btn.style.alignItems = "center";
+      btn.style.fontSize = "0.85rem";
+      
+      const nameSpan = document.createElement("span");
+      nameSpan.textContent = q.name || "Consulta sin nombre";
+      nameSpan.style.whiteSpace = "nowrap";
+      nameSpan.style.overflow = "hidden";
+      nameSpan.style.textOverflow = "ellipsis";
+      nameSpan.style.marginRight = "6px";
+      btn.appendChild(nameSpan);
+
+      const icon = document.createElement("i");
+      icon.setAttribute("data-lucide", "chevron-right");
+      icon.style.width = "12px";
+      icon.style.height = "12px";
+      btn.appendChild(icon);
+
+      btn.addEventListener("click", () => {
+        this.selectQuery(q.id);
+      });
+
+      container.appendChild(btn);
+    });
+
+    if (window.lucide) window.lucide.createIcons();
   }
 }

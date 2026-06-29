@@ -22,7 +22,8 @@ const config = {
       }
     ],
     relationships: [],
-    groups: []
+    groups: [],
+    queries: []
   },
   dom: {
     canvasContainer: document.getElementById("canvas-container"),
@@ -33,7 +34,9 @@ const config = {
     tablesListContainer: document.getElementById("tables-list-container"),
     toastContainer: document.getElementById("toast-container"),
     sqlModal: document.getElementById("sql-modal"),
-    imageModal: document.getElementById("image-modal")
+    imageModal: document.getElementById("image-modal"),
+    queryModal: document.getElementById("query-modal"),
+    btnQueryModalTrigger: document.getElementById("btn-query-manager-trigger")
   }
 };
 
