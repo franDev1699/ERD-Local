@@ -27,6 +27,9 @@ The project has been refactored from a monolithic `app.js` into a modular struct
 - `src/controllers/`: Orchestration and event handling.
     - `AppController.js`: The main orchestrator that initializes services and connects UI to state (e.g., wiring sidebar callbacks to state operations).
     - `InteractionController.js`: Handles canvas-level user interactions (mouse dragging, connection drawing, keyboard events).
+    - `AiController.js`: Handles AI prompt-based generation/modifications, global prompts config, and AI layout.
+    - `QueryController.js`: Manages the SQL Query Library, simulated query testing, and SQL AI suggestions/explanations.
+    - `CollabController.js`: Coordinates real-time project management (dashboard view, identity selection, cursor presence, WebSocket broadcast).
 
 ### Key Design Principles
 - **Single Responsibility (SRP):** Each module has one specific job (e.g., `Renderer` only renders, `StorageService` only saves).

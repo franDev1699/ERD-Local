@@ -5,6 +5,9 @@ Un diseñador de Diagramas de Entidad-Relación (ERD) en tiempo real, ligero, mo
 ## 🚀 Características Principales
 
 *   **Diseño Interactivo:** Lienzo con zoom infinito y *pan* para dibujar y mover tablas.
+*   **Asistente de IA (Generación, Edición y Auto-Organizado):** Permite generar diagramas completos, añadir tablas o modificar las existentes usando prompts en lenguaje natural con soporte para Gemini, OpenAI, Ollama (local) y otros proveedores. Incluye auto-layout asistido por IA.
+*   **Gestor de Consultas SQL con IA:** Biblioteca para crear y simular consultas SQL en motores PostgreSQL, MySQL, SQLite y SQL Server, además de explicarlas y generarlas usando Inteligencia Artificial.
+*   **Documentación en Markdown con IA:** Genera documentación descriptiva detallada en formato Markdown (.md) del esquema de base de datos actual con un solo clic.
 *   **Colaboración en Tiempo Real:** Varias personas pueden editar el mismo diagrama simultáneamente mediante WebSockets. El servidor envía una URL para compartir.
 *   **Ingeniería Inversa (Importador SQL):** Pega un código DDL (`CREATE TABLE ...`) y el sistema generará el diagrama visual automáticamente, detectando relaciones (Foreign Keys) y restricciones.
 *   **Exportador Multi-Dialecto:** Exporta tu modelo visual a código SQL limpio para PostgreSQL, MySQL o SQLite.
