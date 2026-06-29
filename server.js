@@ -342,9 +342,169 @@ function saveProjectState(projectId, state) {
   }
 }
 
+class ContextBuilder {
+  /**
+   * Parsea el prompt y el estado actual para filtrar/compactar la base de datos
+   * que se envía como contexto al modelo de lenguaje.
+   */
+  static build({ currentState, prompt, mode, contextDepth, currentQuerySql }) {
+    if (!currentState || !currentState.tables) {
+      return { tables: [], relationships: [], groups: [] };
+    }
+
+    const tables = currentState.tables;
+    const relationships = currentState.relationships || [];
+    const groups = currentState.groups || [];
+
+    // Estrategia para diseño/layout (solo coordenadas y dimensiones)
+    if (contextDepth === 'layout' || mode === 'layout') {
+      const compactTables = tables.map(t => ({
+        id: t.id,
+        name: t.name,
+        x: t.x,
+        y: t.y,
+        groupId: t.groupId,
+        fieldCount: t.fields ? t.fields.length : 0
+      }));
+      return {
+        tables: compactTables,
+        relationships: relationships,
+        groups: groups
+      };
+    }
+
+    // Estrategia para consultas SQL (explicación, sugerencias, generación)
+    if (contextDepth === 'query' || ['query_generate', 'query_suggest', 'query_explain'].includes(mode)) {
+      let relevantTables = tables;
+      const combinedText = `${prompt || ''} ${currentQuerySql || ''}`;
+      const mentionedIds = this.findMentionedTables(combinedText, tables);
+
+      if (mentionedIds.length > 0) {
+        const relevantIdsSet = this.getRelatedTables(mentionedIds, relationships, 1);
+        relevantTables = tables.filter(t => relevantIdsSet.has(t.id));
+      }
+
+      const queryTables = relevantTables.map(t => {
+        const fieldsStr = (t.fields || []).map(f => {
+          let desc = f.name;
+          if (f.type) desc += ` ${f.type}`;
+          if (f.isPK) desc += ' PK';
+          if (f.isNotNull) desc += ' NOT NULL';
+          if (f.isUnique) desc += ' UNIQUE';
+          return desc;
+        });
+        return {
+          name: t.name,
+          fields: fieldsStr
+        };
+      });
+
+      const activeTableNames = new Set(relevantTables.map(t => t.name));
+      const activeTableIds = new Set(relevantTables.map(t => t.id));
+      
+      const compactRelationships = relationships.filter(rel => 
+        activeTableIds.has(rel.fromTable) && activeTableIds.has(rel.toTable)
+      ).map(rel => {
+        const fromT = tables.find(t => t.id === rel.fromTable);
+        const toT = tables.find(t => t.id === rel.toTable);
+        const fromF = fromT ? fromT.fields.find(f => f.id === rel.fromField) : null;
+        const toF = toT ? toT.fields.find(f => f.id === rel.toField) : null;
+        return {
+          fromTable: fromT ? fromT.name : rel.fromTable,
+          fromField: fromF ? fromF.name : rel.fromField,
+          toTable: toT ? toT.name : rel.toTable,
+          toField: toF ? toF.name : rel.toField
+        };
+      });
+
+      return {
+        tables: queryTables,
+        relationships: compactRelationships
+      };
+    }
+
+    // Estrategia para edición o adición en diagramas grandes (contextDepth 1 o 2)
+    const depth = parseInt(contextDepth, 10);
+    if (!isNaN(depth) && depth >= 1 && depth <= 2) {
+      const mentionedIds = this.findMentionedTables(prompt, tables);
+
+      if (mentionedIds.length === 0) {
+        return currentState;
+      }
+
+      const relevantIdsSet = this.getRelatedTables(mentionedIds, relationships, depth);
+      const detailedTables = tables.filter(t => relevantIdsSet.has(t.id));
+      const detailedTableIds = new Set(detailedTables.map(t => t.id));
+
+      const catalog = tables
+        .filter(t => !detailedTableIds.has(t.id))
+        .map(t => {
+          const pkFields = (t.fields || []).filter(f => f.isPK).map(f => f.name);
+          const fieldsStr = pkFields.length > 0 ? pkFields.join(',') : 'id';
+          return `${t.name}(${fieldsStr})`;
+        });
+
+      const filteredRelationships = relationships.filter(rel =>
+        detailedTableIds.has(rel.fromTable) && detailedTableIds.has(rel.toTable)
+      );
+
+      const detailedGroupIds = new Set(detailedTables.map(t => t.groupId).filter(Boolean));
+      const filteredGroups = groups.filter(g => detailedGroupIds.has(g.id));
+
+      return {
+        tables: detailedTables,
+        relationships: filteredRelationships,
+        groups: filteredGroups,
+        catalog: catalog
+      };
+    }
+
+    return currentState;
+  }
+
+  static findMentionedTables(text, tables) {
+    if (!text) return [];
+    const textLower = text.toLowerCase();
+    const foundIds = [];
+
+    for (const table of tables) {
+      const tableNameEscaped = table.name.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const regex = new RegExp(`\\b${tableNameEscaped}\\b`, 'i');
+      if (regex.test(textLower)) {
+        foundIds.push(table.id);
+      }
+    }
+    return foundIds;
+  }
+
+  static getRelatedTables(startIds, relationships, depth) {
+    const visited = new Set(startIds);
+    let currentLevel = [...startIds];
+
+    for (let d = 0; d < depth; d++) {
+      const nextLevel = [];
+      for (const tableId of currentLevel) {
+        for (const rel of relationships) {
+          if (rel.fromTable === tableId && !visited.has(rel.toTable)) {
+            visited.add(rel.toTable);
+            nextLevel.push(rel.toTable);
+          }
+          if (rel.toTable === tableId && !visited.has(rel.fromTable)) {
+            visited.add(rel.fromTable);
+            nextLevel.push(rel.fromTable);
+          }
+        }
+      }
+      currentLevel = nextLevel;
+      if (currentLevel.length === 0) break;
+    }
+
+    return visited;
+  }
+}
+
 // Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa
-// Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa
-function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql }) {
+function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth }) {
   return new Promise((resolve, reject) => {
     let promptTemplate = '';
     if (mode === 'append') {
@@ -363,15 +523,33 @@ function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, 
       promptTemplate = aiPrompts.mode_create;
     }
 
-    const stateStr = JSON.stringify(currentState || { tables: [], relationships: [], groups: [] });
+    const optimizedContext = ContextBuilder.build({
+      currentState,
+      prompt,
+      mode,
+      contextDepth,
+      currentQuerySql
+    });
+
+    let catalogInstruction = "";
+    if (optimizedContext.catalog && optimizedContext.catalog.length > 0) {
+      catalogInstruction = `\n\nOTRAS TABLAS EXISTENTES EN EL DIAGRAMA (Catálogo de referencia rápida. NO las modifiques ni agregues campos en ellas a menos que se te pida explícitamente):\n- ${optimizedContext.catalog.join('\n- ')}\n`;
+      delete optimizedContext.catalog;
+    }
+
+    const stateStr = JSON.stringify(optimizedContext);
     const currentQuerySqlStr = currentQuerySql ? `\nConsulta SQL actual a modificar:\n${currentQuerySql}` : '';
 
-    const systemInstruction = promptTemplate
+    let systemInstruction = promptTemplate
       .replace(/{expectedSchemaText}/g, aiPrompts.expectedSchemaText)
       .replace(/{layoutRulesText}/g, aiPrompts.layoutRulesText)
       .replace(/{currentState}/g, stateStr)
       .replace(/{engine}/g, engine || 'PostgreSQL')
       .replace(/{currentQuerySql}/g, currentQuerySqlStr);
+
+    if (catalogInstruction) {
+      systemInstruction += catalogInstruction;
+    }
 
     let options = {};
     let clientModule = https;

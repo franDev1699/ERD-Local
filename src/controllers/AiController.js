@@ -392,9 +392,13 @@ export class AiController {
         try {
           const mode = selectMode ? selectMode.value : "replace";
           const currentState = this.stateManager.getState();
+          const selectContextDepth = document.getElementById("ai-context-depth");
+          const contextDepth = selectContextDepth ? selectContextDepth.value : "all";
           
           // Realizar llamada al proxy
-          const result = await AiService.generate(prompt, mode !== 'replace' ? currentState : null, mode);
+          const result = await AiService.generate(prompt, mode !== 'replace' ? currentState : null, mode, {
+            contextDepth: contextDepth
+          });
 
           if (!result || !result.tables || !Array.isArray(result.tables)) {
             throw new Error("El JSON retornado por la IA no tiene el formato correcto o está vacío.");
@@ -698,7 +702,7 @@ export class AiController {
     try {
       const layoutPrompt = "Organiza las posiciones de las tablas y grupos del diagrama actual de manera lógica, limpia y balanceada. Agrupa físicamente las tablas que tengan relaciones entre sí. Conserva los campos, nombres y relaciones existentes, y solo ajusta las posiciones (x, y) de las tablas y de los grupos, y las dimensiones (width, height) de los grupos.";
       
-      const result = await AiService.generate(layoutPrompt, state, 'layout');
+      const result = await AiService.generate(layoutPrompt, state, 'layout', { contextDepth: 'layout' });
 
       if (!result || !result.tables || !Array.isArray(result.tables)) {
         throw new Error("El formato del resultado devuelto por la IA es inválido.");

@@ -251,7 +251,8 @@ export class QueryController {
 
           const result = await AiService.generate(prompt, state, 'query_generate', {
             engine: engine,
-            currentQuerySql: currentSql
+            currentQuerySql: currentSql,
+            contextDepth: 'query'
           });
 
           if (result.sql) {
@@ -304,7 +305,9 @@ export class QueryController {
         try {
           const state = this.stateManager.getState();
           
-          const result = await AiService.generate("sugerir", state, 'query_suggest');
+          const result = await AiService.generate("sugerir", state, 'query_suggest', {
+            contextDepth: 'query'
+          });
 
           suggestionsList.innerHTML = ""; // Clear
           
@@ -377,7 +380,10 @@ export class QueryController {
           const state = this.stateManager.getState();
           const engine = engineSelect ? engineSelect.value : "postgres";
 
-          const result = await AiService.generate(sql, state, 'query_explain', { engine });
+          const result = await AiService.generate(sql, state, 'query_explain', { 
+            engine,
+            contextDepth: 'query'
+          });
 
           this.showQueryResultsPanel();
           this.switchQueryTab('explain');
