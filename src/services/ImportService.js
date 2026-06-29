@@ -104,29 +104,23 @@ export class ImportService {
 
             // Otherwise, it's a column definition
             // format: `name` TYPE [constraints]
-            // We use regex to match the first word as name, second as type
-            const colMatch = def.match(/^([`"'\w]+)\s+([a-zA-Z0-9_()]+)(.*)$/s);
+            // We use regex to match the first word as name, second as type including parentheses
+            const colMatch = def.match(/^([`"'\w]+)\s+([a-zA-Z0-9_]+(?:\s*\([^)]+\))?)(.*)$/s);
             if (colMatch) {
               const colName = colMatch[1].replace(/[`"']/g, '');
-              let colType = colMatch[2];
+              let colType = colMatch[2].trim();
               const rest = colMatch[3] ? colMatch[3].toUpperCase() : "";
               const originalRest = colMatch[3] || "";
 
               const fieldId = `f-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
               fieldMap.set(`${tableName}.${colName}`, fieldId);
 
-              // Standardize types for the UI select
-              let standardizedType = "VARCHAR(255)";
-              const uType = colType.toUpperCase();
-              if (uType.includes("INT")) standardizedType = "INT";
-              if (uType.includes("VARCHAR")) standardizedType = "VARCHAR(255)";
-              if (uType === "TEXT" || uType === "LONGTEXT") standardizedType = "TEXT";
-              if (uType.includes("BOOL") || uType.includes("TINYINT(1)")) standardizedType = "BOOLEAN";
-              if (uType.includes("DECIMAL") || uType.includes("NUMERIC")) standardizedType = "DECIMAL(10,2)";
-              if (uType.includes("TIME") || uType.includes("DATE")) standardizedType = "TIMESTAMP";
-              if (uType === "DATE") standardizedType = "DATE";
+              // Standardize or clean types, but preserve their length
+              let standardizedType = colType.toUpperCase();
+              if (standardizedType === "INTEGER") standardizedType = "INT";
+              if (standardizedType === "BOOL") standardizedType = "BOOLEAN";
 
-              let isAutoIncrement = rest.includes("AUTO_INCREMENT") || rest.includes("AUTOINCREMENT") || uType === "SERIAL" || uType === "BIGSERIAL";
+              let isAutoIncrement = rest.includes("AUTO_INCREMENT") || rest.includes("AUTOINCREMENT") || standardizedType === "SERIAL" || standardizedType === "BIGSERIAL";
               let isPK = rest.includes("PRIMARY KEY");
               let isNotNull = rest.includes("NOT NULL") || isPK;
               let isUnique = rest.includes("UNIQUE");

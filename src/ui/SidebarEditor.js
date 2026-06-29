@@ -311,20 +311,15 @@ export class SidebarEditor {
     const uqChecked = field.isUnique ? "checked" : "";
     const defValue = field.defaultValue || "";
 
+    const { baseType, length } = this._parseFieldType(field.type);
+    const typeSelectHtml = this._getTypeSelectHtml(baseType);
+
     item.innerHTML = `
       <div class="field-editor-row-main">
         <div class="field-drag-handle" title="Arrastrar para mover · Ctrl+Arrastrar para copiar"><i data-lucide="grip-vertical"></i></div>
         <input type="text" class="field-name-input" value="${field.name}" placeholder="nombre_campo">
-        <select class="field-type-select">
-          <option value="INT" ${field.type === 'INT' ? 'selected' : ''}>INT</option>
-          <option value="VARCHAR(255)" ${field.type === 'VARCHAR(255)' ? 'selected' : ''}>VARCHAR(255)</option>
-          <option value="VARCHAR(50)" ${field.type === 'VARCHAR(50)' ? 'selected' : ''}>VARCHAR(50)</option>
-          <option value="TEXT" ${field.type === 'TEXT' ? 'selected' : ''}>TEXT</option>
-          <option value="BOOLEAN" ${field.type === 'BOOLEAN' ? 'selected' : ''}>BOOLEAN</option>
-          <option value="TIMESTAMP" ${field.type === 'TIMESTAMP' ? 'selected' : ''}>TIMESTAMP</option>
-          <option value="DECIMAL(10,2)" ${field.type === 'DECIMAL(10,2)' ? 'selected' : ''}>DECIMAL(10,2)</option>
-          <option value="DATE" ${field.type === 'DATE' ? 'selected' : ''}>DATE</option>
-        </select>
+        ${typeSelectHtml}
+        <input type="text" class="field-length-input" value="${length}" placeholder="Long." title="Longitud o Valores (ej: 255, 10,2 o 'a','b')">
         <label class="field-checkbox-label ${pkChecked}" title="Llave Primaria (PK)">
           <input type="checkbox" class="field-pk-checkbox" ${field.isPK ? 'checked' : ''}>
           PK
@@ -451,9 +446,17 @@ export class SidebarEditor {
     });
 
     const typeSelect = item.querySelector(".field-type-select");
-    typeSelect.addEventListener("change", (e) => {
-      this.onFieldUpdate(tableId, field.id, { type: e.target.value });
-    });
+    const lengthInput = item.querySelector(".field-length-input");
+
+    const updateCombinedType = () => {
+      const baseVal = typeSelect.value;
+      const lenVal = lengthInput.value.trim();
+      const combined = lenVal ? `${baseVal}(${lenVal})` : baseVal;
+      this.onFieldUpdate(tableId, field.id, { type: combined });
+    };
+
+    typeSelect.addEventListener("change", updateCombinedType);
+    lengthInput.addEventListener("change", updateCombinedType);
 
     const pkCheckbox = item.querySelector(".field-pk-checkbox");
     pkCheckbox.addEventListener("change", (e) => {
@@ -633,5 +636,68 @@ export class SidebarEditor {
 
     this.container.appendChild(card);
     if (window.lucide) window.lucide.createIcons();
+  }
+
+  _parseFieldType(fullType) {
+    if (!fullType) return { baseType: "VARCHAR", length: "255" };
+    const match = fullType.match(/^([^(]+)(?:\(([^)]+)\))?$/);
+    if (match) {
+      return {
+        baseType: match[1].trim().toUpperCase(),
+        length: match[2] ? match[2].trim() : ""
+      };
+    }
+    return { baseType: fullType.toUpperCase(), length: "" };
+  }
+
+  _getTypeSelectHtml(selectedBaseType) {
+    const categories = {
+      "Numérico": [
+        "INT", "TINYINT", "SMALLINT", "MEDIUMINT", "BIGINT", 
+        "DECIMAL", "FLOAT", "DOUBLE", "REAL", "BIT", "BOOLEAN", "SERIAL"
+      ],
+      "Fecha y Hora": [
+        "DATE", "DATETIME", "TIMESTAMP", "TIME", "YEAR"
+      ],
+      "Cadena": [
+        "VARCHAR", "CHAR", "TINYTEXT", "TEXT", "MEDIUMTEXT", "LONGTEXT",
+        "BINARY", "VARBINARY", "TINYBLOB", "BLOB", "MEDIUMBLOB", "LONGBLOB",
+        "ENUM", "SET"
+      ],
+      "Espacial": [
+        "GEOMETRY", "POINT", "LINESTRING", "POLYGON", 
+        "MULTIPOINT", "MULTILINESTRING", "MULTIPOLYGON", "GEOMETRYCOLLECTION"
+      ],
+      "JSON / Especiales": [
+        "JSON", "UUID", "INET4", "INET6"
+      ]
+    };
+
+    let typeExists = false;
+    const cleanBase = selectedBaseType ? selectedBaseType.trim().toUpperCase() : "";
+    for (const types of Object.values(categories)) {
+      if (types.includes(cleanBase)) {
+        typeExists = true;
+        break;
+      }
+    }
+
+    let html = `<select class="field-type-select">`;
+    if (!typeExists && cleanBase) {
+      html += `<optgroup label="Personalizado">`;
+      html += `<option value="${cleanBase}" selected>${cleanBase}</option>`;
+      html += `</optgroup>`;
+    }
+
+    for (const [category, types] of Object.entries(categories)) {
+      html += `<optgroup label="${category}">`;
+      types.forEach(t => {
+        const isSelected = t === cleanBase ? 'selected' : '';
+        html += `<option value="${t}" ${isSelected}>${t}</option>`;
+      });
+      html += `</optgroup>`;
+    }
+    html += `</select>`;
+    return html;
   }
 }

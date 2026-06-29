@@ -127,8 +127,46 @@ export class AppController {
     this.refreshUI();
     this.interactionController.init();
     this.setupGlobalEventListeners();
+    this.setupSidebarResizer();
     this.canvasManager.centerCanvas();
     this.setupAiModal();
+  }
+
+  setupSidebarResizer() {
+    const sidebar = document.querySelector(".sidebar");
+    const resizer = document.querySelector(".sidebar-resizer");
+    if (!sidebar || !resizer) return;
+
+    // Load saved width
+    const savedWidth = localStorage.getItem("erd-sidebar-width");
+    if (savedWidth) {
+      sidebar.style.width = `${savedWidth}px`;
+    }
+
+    let isResizing = false;
+
+    resizer.addEventListener("mousedown", (e) => {
+      isResizing = true;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      resizer.classList.add("resizing");
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isResizing) return;
+      const newWidth = Math.max(300, Math.min(800, e.clientX));
+      sidebar.style.width = `${newWidth}px`;
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (isResizing) {
+        isResizing = false;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        resizer.classList.remove("resizing");
+        localStorage.setItem("erd-sidebar-width", parseInt(sidebar.style.width, 10));
+      }
+    });
   }
 
   handleStateChange(newState, isRemote = false) {

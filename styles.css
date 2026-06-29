@@ -64,6 +64,7 @@ body {
 
 /* Sidebar Styling */
 .sidebar {
+  position: relative;
   width: 320px;
   background-color: var(--color-bg-sidebar);
   border-right: 1px solid var(--color-border);
@@ -72,6 +73,22 @@ body {
   z-index: 10;
   box-shadow: var(--shadow-lg);
   flex-shrink: 0;
+}
+
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 20;
+  transition: background-color 0.15s ease;
+}
+
+.sidebar-resizer:hover,
+.sidebar-resizer.resizing {
+  background-color: var(--color-primary);
 }
 
 .sidebar-header {
@@ -909,9 +926,9 @@ select option {
 
 /* Floating Bottom Toolbar Container */
 .bottom-toolbar {
-  position: fixed;
+  position: absolute;
   bottom: 24px;
-  left: calc(320px + (100vw - 320px) / 2);
+  left: 50%;
   transform: translateX(-50%);
   z-index: 10;
   display: flex;
@@ -1551,6 +1568,23 @@ select option {
   display: flex;
   gap: 6px;
   align-items: center;
+  width: 100%;
+}
+
+.field-editor-row-main .field-name-input {
+  flex: 1.2;
+  min-width: 0;
+}
+
+.field-editor-row-main .field-type-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-editor-row-main .field-length-input {
+  width: 55px;
+  flex-shrink: 0;
+  text-align: center;
 }
 
 .field-advanced-options {
