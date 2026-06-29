@@ -315,7 +315,10 @@
 		<div id="project-dashboard" class="dashboard-container hidden">
 			<div class="dashboard-header">
 				<h1 class="app-logo"><i data-lucide="database" style="color: var(--color-primary);"></i> ERD <span>Collaborative</span></h1>
-				<button id="btn-dashboard-new-project" class="btn btn-primary"><i data-lucide="plus"></i> Nuevo Proyecto</button>
+				<div style="display: flex; gap: 10px;">
+					<button id="btn-dashboard-ai-config" class="btn btn-secondary" title="Configuración de IA y Prompts"><i data-lucide="settings"></i> Configuración IA</button>
+					<button id="btn-dashboard-new-project" class="btn btn-primary"><i data-lucide="plus"></i> Nuevo Proyecto</button>
+				</div>
 			</div>
 			<div class="dashboard-content">
 				<h2 class="dashboard-title">Mis Proyectos</h2>
@@ -374,6 +377,7 @@
 					<div class="ai-tabs" style="display: flex; border-bottom: 1px solid var(--color-border); margin-bottom: 20px;">
 						<button id="tab-ai-assistant" class="ai-tab-btn active" style="flex: 1; padding: 10px; background: none; border: none; border-bottom: 2px solid var(--color-primary); color: var(--color-text-main); font-weight: 600; cursor: pointer; text-align: center;">Asistente</button>
 						<button id="tab-ai-config" class="ai-tab-btn" style="flex: 1; padding: 10px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--color-text-muted); font-weight: 500; cursor: pointer; text-align: center;">Configuración de IA</button>
+						<button id="tab-ai-prompts" class="ai-tab-btn" style="flex: 1; padding: 10px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--color-text-muted); font-weight: 500; cursor: pointer; text-align: center;">Prompts</button>
 					</div>
 
 					<!-- View 1: Assistant -->
@@ -447,6 +451,39 @@
 
 							<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px;">
 								<button id="btn-save-ai-config" class="btn btn-primary btn-full">Guardar Configuración</button>
+							</div>
+						</div>
+					</div>
+
+					<!-- View 3: Prompts -->
+					<div id="ai-prompts-view" class="ai-view-pane hidden">
+						<div style="display: flex; flex-direction: column; gap: 15px;">
+							<div>
+								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">Selecciona el Prompt a editar:</label>
+								<select id="ai-prompt-select" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main);">
+									<option value="expectedSchemaText">Esquema JSON Esperado (expectedSchemaText)</option>
+									<option value="layoutRulesText">Reglas de Posicionamiento (layoutRulesText)</option>
+									<option value="mode_create">Modo: Crear desde Cero (mode_create)</option>
+									<option value="mode_append">Modo: Agregar al Diagrama (mode_append)</option>
+									<option value="mode_edit">Modo: Editar/Modificar (mode_edit)</option>
+									<option value="mode_layout">Modo: Reorganizar (mode_layout)</option>
+									<option value="mode_query_generate">Modo: Generar Consulta SQL (mode_query_generate)</option>
+									<option value="mode_query_suggest">Modo: Sugerir Consultas SQL (mode_query_suggest)</option>
+									<option value="mode_query_explain">Modo: Explicar Consulta SQL (mode_query_explain)</option>
+									<option value="prompt_document">Modo: Generar Documentación (prompt_document)</option>
+								</select>
+							</div>
+
+							<div>
+								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">Contenido de las Instrucciones del Sistema:</label>
+								<textarea id="ai-prompt-editor" style="width: 100%; height: 280px; padding: 12px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-family: monospace; font-size: 0.82rem; resize: vertical; line-height: 1.5;"></textarea>
+								<span style="font-size: 0.75rem; color: var(--color-text-muted); display: block; margin-top: 4px;">Puedes usar marcadores como <code>{expectedSchemaText}</code>, <code>{layoutRulesText}</code>, <code>{currentState}</code>, <code>{engine}</code> y <code>{currentQuerySql}</code>.</span>
+							</div>
+
+							<div style="display: flex; justify-content: space-between; gap: 10px; margin-top: 15px;">
+								<button id="btn-reset-ai-prompts" class="btn btn-danger-outline" style="padding: 10px 15px; font-size: 0.85rem;" title="Restablecer valores de fábrica"><i data-lucide="rotate-ccw"></i> Restablecer</button>
+								<button id="btn-download-ai-prompts" class="btn btn-secondary" style="padding: 10px 15px; font-size: 0.85rem;" title="Descargar como ai_prompts.json"><i data-lucide="download"></i> Descargar</button>
+								<button id="btn-save-ai-prompts" class="btn btn-primary" style="flex: 1; padding: 10px;"><i data-lucide="save"></i> Guardar Prompts</button>
 							</div>
 						</div>
 					</div>

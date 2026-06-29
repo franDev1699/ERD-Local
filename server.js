@@ -31,6 +31,241 @@ if (!fs.existsSync(defaultPath) && fs.existsSync(STATE_FILE)) {
   }
 }
 
+const PROMPTS_FILE = path.join(__dirname, 'ai_prompts.json');
+
+const DEFAULT_PROMPTS = {
+  expectedSchemaText: `Esquema JSON esperado:
+{
+  "tables": [
+    {
+      "id": "string único (ej: tbl-users, tbl-orders)",
+      "name": "string (nombre de tabla sin espacios, snake_case, ej: usuarios, ordenes_compra)",
+      "x": 100, // número
+      "y": 100, // número
+      "fields": [
+        {
+          "id": "string único (ej: f-users-1, f-users-2)",
+          "name": "string (nombre de campo, snake_case, ej: id, email, created_at)",
+          "type": "string (ej: INT, VARCHAR(255), TEXT, DECIMAL(10,2), DATETIME, BOOLEAN)",
+          "isPK": boolean (si es clave primaria),
+          "isAutoIncrement": boolean (opcional, true si es PK autoincrementable),
+          "isNotNull": boolean (si es NOT NULL),
+          "isUnique": boolean (opcional, si es único),
+          "defaultValue": "string (opcional, valor por defecto)"
+        }
+      ],
+      "color": "string (código hexadecimal de color, ej: #6366f1, #10b981, #ef4444, #f59e0b, #ec4899, #06b6d4)",
+      "groupId": "string o null (id del grupo al que pertenece la tabla, o null si ninguno)"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "string único (ej: rel-1)",
+      "fromTable": "string (id de la tabla de origen/padre)",
+      "fromField": "string (id del campo de origen en la tabla de origen)",
+      "toTable": "string (id de la tabla de destino/hijo)",
+      "toField": "string (id del campo de destino en la tabla de destino)"
+    }
+  ],
+  "groups": [
+    {
+      "id": "string único (ej: group-1)",
+      "name": "string (nombre del grupo)",
+      "color": "string (código hexadecimal de color, ej: #374151)",
+      "x": 100, // número
+      "y": 100, // número
+      "width": 300, // número
+      "height": 200 // número
+    }
+  ]
+}
+
+IMPORTANTE - IDIOMA DE NOMENCLATURA:
+Todos los nombres de tablas, campos y grupos DEBEN estar en INGLÉS (snake_case). Ejemplos: users, orders, created_at, product_name, order_items. Nunca uses nombres en español como 'usuarios', 'pedidos', 'nombre_producto'.`,
+
+  layoutRulesText: `REGLAS DE DISEÑO DE COORDENADAS Y AGRUPACIONES (CRÍTICO):
+1. NO permitas la superposición de ningún elemento. Las tablas y los grupos deben estar claramente separados y no superponerse.
+2. ESPACIADO GENERAL:
+   - Mantén al menos 100px de separación entre cualquier tabla suelta (sin grupo) y otros elementos (otras tablas o grupos).
+   - Mantén al menos 150px de separación entre grupos distintos.
+3. TABLAS DENTRO DE GRUPOS (groupId definido):
+   - Una tabla perteneciente a un grupo DEBE ubicarse físicamente dentro de los límites de ese grupo.
+   - PADDING SUPERIOR (Grupo): El título del grupo se renderiza en la parte superior. Las tablas dentro del grupo DEBEN tener su coordenada 'y' al menos a 60px del borde superior del grupo (ej: y_tabla >= group.y + 60). Nunca coloques una tabla cubriendo el título del grupo.
+   - PADDING LATERAL E INFERIOR (Grupo): Las tablas deben estar separadas de los bordes izquierdo y derecho por al menos 30px, y del borde inferior del grupo por al menos 50px (ej: y_tabla + alto_tabla <= group.y + group.height - 50). Esto evita estrictamente que peguen al borde inferior del grupo.
+   - ESPACIADO INTERNO: Las tablas dentro del mismo grupo deben distribuirse ordenadamente (p. ej. en columnas o cuadrícula). Deja al menos 80px de distancia horizontal y 60px de distancia vertical entre las tablas del mismo grupo.
+   - TAMAÑO DEL GRUPO: Ajusta 'width' y 'height' del grupo de manera proporcional para que todas sus tablas quepan holgadamente dentro, respetando los paddings y márgenes descritos (ej. para dos tablas medianas de alto 200px en vertical, el grupo necesita al menos width: 310px y height: 510px).`,
+
+  mode_create: `Eres un diseñador de bases de datos experto. Genera un esquema de base de datos ERD desde cero que responda a la solicitud del usuario en el siguiente formato JSON estricto. No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
+
+{expectedSchemaText}
+
+Reglas importantes:
+1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
+2. Cada tabla debe tener una clave primaria (isPK: true).
+3. Todas las relaciones referenciadas en 'relationships' deben usar IDs de tablas y campos existentes en el JSON.
+4. Asigna coordenadas x e y, así como dimensiones de grupos y tablas de forma distribuida de acuerdo con estas directrices:
+{layoutRulesText}`,
+
+  mode_append: `Eres un diseñador de bases de datos experto. El usuario desea AGREGAR nuevos elementos (tablas, relaciones, grupos) al diagrama actual. 
+NO debes modificar, renombrar, alterar ni eliminar ninguna de las tablas, campos, relaciones ni grupos existentes en el 'Estado actual del diagrama' suministrado.
+Genera únicamente los NUEVOS elementos que se deben agregar para cumplir la solicitud.
+
+Tu respuesta en formato JSON estricto debe incluir:
+1. En "tables": Únicamente las NUEVAS tablas que se van a agregar. NO incluyas ninguna de las tablas existentes del 'Estado actual del diagrama'.
+2. En "relationships": Únicamente las NUEVAS relaciones creadas. Puedes relacionar las tablas nuevas entre sí, o relacionar las tablas nuevas con las existentes usando los IDs de las tablas existentes. NO incluyas relaciones que ya existen.
+3. En "groups": Únicamente los NUEVOS grupos creados (si aplica).
+No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
+
+{expectedSchemaText}
+
+Reglas importantes:
+1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
+2. Cada tabla nueva debe tener una clave primaria (isPK: true).
+3. Las nuevas relaciones en 'relationships' deben usar IDs de tablas y campos existentes en el estado actual o en las nuevas tablas.
+4. Asigna coordenadas x e y a las nuevas tablas y grupos de acuerdo con las siguientes directrices:
+{layoutRulesText}
+5. Queda estrictamente PROHIBIDO incluir tablas o relaciones existentes en el JSON de respuesta. Solo devuelve lo NUEVO.
+
+Estado actual del diagrama (para referencia de contexto, nombres e IDs existentes):
+{currentState}`,
+
+  mode_edit: `Eres un diseñador de bases de datos experto. El usuario desea MODIFICAR o EDITAR el diagrama actual.
+Analiza el 'Estado actual del diagrama' suministrado y aplica únicamente los cambios solicitados por el usuario (por ejemplo: agregar o modificar campos, renombrar una tabla, agregar una relación, eliminar una tabla, etc.).
+NO alteres, reescribas ni elimines tablas, campos, tipos o relaciones a menos que el usuario lo pida explícitamente. Mantén la estructura existente intacta tanto como sea posible.
+
+Debes devolver el estado COMPLETO del diagrama en tu respuesta JSON, incluyendo todas las tablas y relaciones (tanto las modificadas como las no modificadas). Conserva estrictamente los IDs existentes (de tablas, campos, relaciones y grupos) que no hayan sido eliminados para no romper el lienzo.
+No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
+
+{expectedSchemaText}
+
+Reglas importantes:
+1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
+2. Cada tabla debe tener una clave primaria (isPK: true).
+3. Conserva los IDs originales de las tablas, campos y relaciones que no cambien.
+4. Si agregas o reposicionas tablas o grupos, sigue estrictamente estas directrices:
+{layoutRulesText}
+4. Si el usuario pide eliminar algún elemento, puedes omitirlo del JSON de salida.
+
+Estado actual del diagrama (si deseas extenderlo o relacionarlo, úsalo como base):
+{currentState}`,
+
+  mode_layout: `Eres un diseñador de bases de datos experto. El usuario desea REORGANIZAR las posiciones y dimensiones de las tablas y grupos del diagrama para mejorar su legibilidad y estética.
+NO agregues, modifiques ni elimines ninguna tabla, campo, tipo ni relación. Solo debes ajustar las coordenadas (x, y) de las tablas y de los grupos, y las dimensiones (width, height) de los grupos.
+Agrupa físicamente cerca las tablas relacionadas, manteniendo un excelente espacio libre entre ellas.
+
+Debes devolver el estado COMPLETO del diagrama en tu respuesta JSON, incluyendo exactamente las mismas tablas, relaciones y grupos (con sus nombres e IDs idénticos), pero con coordenadas optimizadas.
+No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
+
+{expectedSchemaText}
+
+Reglas importantes:
+1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
+2. No cambies nombres de tablas, campos ni relaciones. Tampoco añadas ni elimines campos.
+3. Organiza todas las coordenadas y dimensiones del diagrama siguiendo al pie de la letra estas directrices:
+{layoutRulesText}
+
+Estado actual del diagrama:
+{currentState}`,
+
+  mode_query_generate: `Eres un administrador de bases de datos y desarrollador SQL experto.
+Tu tarea es generar o modificar una consulta SQL basada en la descripción del usuario y el esquema de base de datos suministrado.
+El motor de base de datos destino es: {engine}.
+Asegúrate de que la consulta SQL use la sintaxis correcta del motor destino, califique los nombres de los campos de manera clara y use JOINs adecuados si hay relaciones entre las tablas.
+
+Debes devolver la respuesta estrictamente en el siguiente formato JSON:
+{
+  "name": "Nombre corto descriptivo de la consulta",
+  "sql": "Código SQL formateado y listo para ejecutar",
+  "explanation": "Breve explicación de una línea sobre cómo funciona la consulta"
+}
+
+No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON.
+
+Esquema actual de base de datos:
+{currentState}
+{currentQuerySql}`,
+
+  mode_query_suggest: `Eres un administrador de bases de datos y desarrollador SQL experto.
+Analiza el esquema de base de datos suministrado y sugiere 3 consultas SQL de negocio o analíticas útiles (ej. reportes, acumulados, cruces de información).
+Para cada sugerencia, proporciona un nombre y un prompt descriptivo en español que el usuario pueda usar para generar la consulta.
+
+Debes devolver la respuesta estrictamente en el siguiente formato JSON de arreglo:
+[
+  {
+    "name": "ej: Usuarios con más compras",
+    "prompt": "ej: Muestra los top 5 usuarios con mayor volumen de compras y sus datos de perfil"
+  },
+  ...
+]
+
+No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON.
+
+Esquema de base de datos:
+{currentState}`,
+
+  mode_query_explain: `Eres un administrador de bases de datos y profesor SQL experto.
+Tu tarea es explicar de manera clara y detallada cómo funciona la consulta SQL proporcionada por el usuario.
+El motor de base de datos es: {engine}.
+
+Debes explicar:
+1. Qué hace la consulta paso a paso (SELECT, FROM, JOINs, WHERE, GROUP BY, ORDER BY, etc.)
+2. Qué tablas y campos involucra y por qué
+3. Si usa JOINs, explica el tipo de JOIN y cómo conecta las tablas
+4. Si tiene funciones de agregación, subconsultas o CTEs, explícalas
+5. Posibles optimizaciones o mejoras si las detectas
+
+Devuelve la respuesta estrictamente en el siguiente formato JSON:
+{
+  "explanation": "Explicación detallada y bien formateada de la consulta"
+}
+
+No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON. Responde en español.
+
+Esquema actual de base de datos:
+{currentState}`,
+
+  prompt_document: `Genera una documentación en Markdown (.md) elegante, detallada y profesional para el siguiente esquema de base de datos JSON.
+
+Esquema JSON de la Base de Datos:
+{currentState}
+
+La documentación debe incluir:
+1. Un título principal llamativo.
+2. Una introducción que describa conceptualmente el propósito general del sistema basándote en las tablas encontradas.
+3. Un índice de contenidos.
+4. Por cada tabla:
+   - Su nombre y una breve descripción de su función.
+   - Una tabla Markdown con sus campos, detallando: Nombre de columna, Tipo de dato, Llaves (PK/FK), si permite Nulos (NULL/NOT NULL), Valor por defecto (si lo tiene) y una descripción detallada que supongas para qué sirve ese campo.
+5. Una sección de Relaciones y Reglas de Negocio, describiendo qué tabla se relaciona con cuál y la cardinalidad.
+6. Un bloque de diagrama Mermaid que ilustre visualmente las relaciones entre tablas (usando la sintaxis erDiagram de Mermaid).
+
+Asegúrate de que la salida sea estrictamente Markdown limpio para poder ser guardado como un archivo .md. No agregues explicaciones fuera del bloque Markdown.`
+};
+
+let aiPrompts = { ...DEFAULT_PROMPTS };
+
+function loadAiPrompts() {
+  if (fs.existsSync(PROMPTS_FILE)) {
+    try {
+      const data = fs.readFileSync(PROMPTS_FILE, 'utf8');
+      aiPrompts = { ...DEFAULT_PROMPTS, ...JSON.parse(data) };
+    } catch (e) {
+      console.error('Error al cargar ai_prompts.json:', e.message);
+      aiPrompts = { ...DEFAULT_PROMPTS };
+    }
+  } else {
+    try {
+      fs.writeFileSync(PROMPTS_FILE, JSON.stringify(DEFAULT_PROMPTS, null, 2), 'utf8');
+      console.log('Creado archivo de prompts por defecto: ai_prompts.json');
+    } catch (e) {
+      console.error('Error al crear ai_prompts.json:', e.message);
+    }
+  }
+}
+
+loadAiPrompts();
+
+
 // MIME types mapping
 const MIME_TYPES = {
   '.html': 'text/html',
@@ -111,202 +346,33 @@ function saveProjectState(projectId, state) {
 // Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa
 function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql }) {
   return new Promise((resolve, reject) => {
-    const expectedSchemaText = `Esquema JSON esperado:
-{
-  "tables": [
-    {
-      "id": "string único (ej: tbl-users, tbl-orders)",
-      "name": "string (nombre de tabla sin espacios, snake_case, ej: usuarios, ordenes_compra)",
-      "x": 100, // número
-      "y": 100, // número
-      "fields": [
-        {
-          "id": "string único (ej: f-users-1, f-users-2)",
-          "name": "string (nombre de campo, snake_case, ej: id, email, created_at)",
-          "type": "string (ej: INT, VARCHAR(255), TEXT, DECIMAL(10,2), DATETIME, BOOLEAN)",
-          "isPK": boolean (si es clave primaria),
-          "isAutoIncrement": boolean (opcional, true si es PK autoincrementable),
-          "isNotNull": boolean (si es NOT NULL),
-          "isUnique": boolean (opcional, si es único),
-          "defaultValue": "string (opcional, valor por defecto)"
-        }
-      ],
-      "color": "string (código hexadecimal de color, ej: #6366f1, #10b981, #ef4444, #f59e0b, #ec4899, #06b6d4)",
-      "groupId": "string o null (id del grupo al que pertenece la tabla, o null si ninguno)"
-    }
-  ],
-  "relationships": [
-    {
-      "id": "string único (ej: rel-1)",
-      "fromTable": "string (id de la tabla de origen/padre)",
-      "fromField": "string (id del campo de origen en la tabla de origen)",
-      "toTable": "string (id de la tabla de destino/hijo)",
-      "toField": "string (id del campo de destino en la tabla de destino)"
-    }
-  ],
-  "groups": [
-    {
-      "id": "string único (ej: group-1)",
-      "name": "string (nombre del grupo)",
-      "color": "string (código hexadecimal de color, ej: #374151)",
-      "x": 100, // número
-      "y": 100, // número
-      "width": 300, // número
-      "height": 200 // número
-    }
-  ]
-}
-
-IMPORTANTE - IDIOMA DE NOMENCLATURA:
-Todos los nombres de tablas, campos y grupos DEBEN estar en INGLÉS (snake_case). Ejemplos: users, orders, created_at, product_name, order_items. Nunca uses nombres en español como 'usuarios', 'pedidos', 'nombre_producto'.`;
-
-    const layoutRulesText = `REGLAS DE DISEÑO DE COORDENADAS Y AGRUPACIONES (CRÍTICO):
-1. NO permitas la superposición de ningún elemento. Las tablas y los grupos deben estar claramente separados y no superponerse.
-2. ESPACIADO GENERAL:
-   - Mantén al menos 100px de separación entre cualquier tabla suelta (sin grupo) y otros elementos (otras tablas o grupos).
-   - Mantén al menos 150px de separación entre grupos distintos.
-3. TABLAS DENTRO DE GRUPOS (groupId definido):
-   - Una tabla perteneciente a un grupo DEBE ubicarse físicamente dentro de los límites de ese grupo.
-   - PADDING SUPERIOR (Grupo): El título del grupo se renderiza en la parte superior. Las tablas dentro del grupo DEBEN tener su coordenada 'y' al menos a 60px del borde superior del grupo (ej: y_tabla >= group.y + 60). Nunca coloques una tabla cubriendo el título del grupo.
-   - PADDING LATERAL E INFERIOR (Grupo): Las tablas deben estar separadas de los bordes izquierdo y derecho por al menos 30px, y del borde inferior del grupo por al menos 50px (ej: y_tabla + alto_tabla <= group.y + group.height - 50). Esto evita estrictamente que peguen al borde inferior del grupo.
-   - ESPACIADO INTERNO: Las tablas dentro del mismo grupo deben distribuirse ordenadamente (p. ej. en columnas o cuadrícula). Deja al menos 80px de distancia horizontal y 60px de distancia vertical entre las tablas del mismo grupo.
-   - TAMAÑO DEL GRUPO: Ajusta 'width' y 'height' del grupo de manera proporcional para que todas sus tablas quepan holgadamente dentro, respetando los paddings y márgenes descritos (ej. para dos tablas medianas de alto 200px en vertical, el grupo necesita al menos width: 310px y height: 510px).`;
-
-    let systemInstruction = '';
-
+    let promptTemplate = '';
     if (mode === 'append') {
-      systemInstruction = `Eres un diseñador de bases de datos experto. El usuario desea AGREGAR nuevos elementos (tablas, relaciones, grupos) al diagrama actual. 
-NO debes modificar, renombrar, alterar ni eliminar ninguna de las tablas, campos, relaciones ni grupos existentes en el 'Estado actual del diagrama' suministrado.
-Genera únicamente los NUEVOS elementos que se deben agregar para cumplir la solicitud.
-
-Tu respuesta en formato JSON estricto debe incluir:
-1. En "tables": Únicamente las NUEVAS tablas que se van a agregar. NO incluyas ninguna de las tablas existentes del 'Estado actual del diagrama'.
-2. En "relationships": Únicamente las NUEVAS relaciones creadas. Puedes relacionar las tablas nuevas entre sí, o relacionar las tablas nuevas con las existentes usando los IDs de las tablas existentes. NO incluyas relaciones que ya existen.
-3. En "groups": Únicamente los NUEVOS grupos creados (si aplica).
-No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
-
-${expectedSchemaText}
-
-Reglas importantes:
-1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
-2. Cada tabla nueva debe tener una clave primaria (isPK: true).
-3. Las nuevas relaciones en 'relationships' deben usar IDs de tablas y campos existentes en el estado actual o en las nuevas tablas.
-4. Asigna coordenadas x e y a las nuevas tablas y grupos de acuerdo con las siguientes directrices:
-${layoutRulesText}
-5. Queda estrictamente PROHIBIDO incluir tablas o relaciones existentes en el JSON de respuesta. Solo devuelve lo NUEVO.
-
-Estado actual del diagrama (para referencia de contexto, nombres e IDs existentes):
-${JSON.stringify(currentState || { tables: [], relationships: [], groups: [] })}`;
+      promptTemplate = aiPrompts.mode_append;
     } else if (mode === 'edit') {
-      systemInstruction = `Eres un diseñador de bases de datos experto. El usuario desea MODIFICAR o EDITAR el diagrama actual.
-Analiza el 'Estado actual del diagrama' suministrado y aplica únicamente los cambios solicitados por el usuario (por ejemplo: agregar o modificar campos, renombrar una tabla, agregar una relación, eliminar una tabla, etc.).
-NO alteres, reescribas ni elimines tablas, campos, tipos o relaciones a menos que el usuario lo pida explícitamente. Mantén la estructura existente intacta tanto como sea posible.
-
-Debes devolver el estado COMPLETO del diagrama en tu respuesta JSON, incluyendo todas las tablas y relaciones (tanto las modificadas como las no modificadas). Conserva estrictamente los IDs existentes (de tablas, campos, relaciones y grupos) que no hayan sido eliminados para no romper el lienzo.
-No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
-
-${expectedSchemaText}
-
-Reglas importantes:
-1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
-2. Cada tabla debe tener una clave primaria (isPK: true).
-3. Conserva los IDs originales de las tablas, campos y relaciones que no cambien.
-4. Si agregas o reposicionas tablas o grupos, sigue estrictamente estas directrices:
-${layoutRulesText}
-4. Si el usuario pide eliminar algún elemento, puedes omitirlo del JSON de salida.
-
-Estado actual del diagrama (si deseas extenderlo o relacionarlo, úsalo como base):
-${JSON.stringify(currentState || { tables: [], relationships: [], groups: [] })}`;
+      promptTemplate = aiPrompts.mode_edit;
     } else if (mode === 'layout') {
-      systemInstruction = `Eres un diseñador de bases de datos experto. El usuario desea REORGANIZAR las posiciones y dimensiones de las tablas y grupos del diagrama para mejorar su legibilidad y estética.
-NO agregues, modifiques ni elimines ninguna tabla, campo, tipo ni relación. Solo debes ajustar las coordenadas (x, y) de las tablas y de los grupos, y las dimensiones (width, height) de los grupos.
-Agrupa físicamente cerca las tablas relacionadas, manteniendo un excelente espacio libre entre ellas.
-
-Debes devolver el estado COMPLETO del diagrama en tu respuesta JSON, incluyendo exactamente las mismas tablas, relaciones y grupos (con sus nombres e IDs idénticos), pero con coordenadas optimizadas.
-No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
-
-${expectedSchemaText}
-
-Reglas importantes:
-1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
-2. No cambies nombres de tablas, campos ni relaciones. Tampoco añadas ni elimines campos.
-3. Organiza todas las coordenadas y dimensiones del diagrama siguiendo al pie de la letra estas directrices:
-${layoutRulesText}
-
-Estado actual del diagrama:
-${JSON.stringify(currentState || { tables: [], relationships: [], groups: [] })}`;
+      promptTemplate = aiPrompts.mode_layout;
     } else if (mode === 'query_generate') {
-      systemInstruction = `Eres un administrador de bases de datos y desarrollador SQL experto.
-Tu tarea es generar o modificar una consulta SQL basada en la descripción del usuario y el esquema de base de datos suministrado.
-El motor de base de datos destino es: ${engine || 'PostgreSQL'}.
-Asegúrate de que la consulta SQL use la sintaxis correcta del motor destino, califique los nombres de los campos de manera clara y use JOINs adecuados si hay relaciones entre las tablas.
-
-Debes devolver la respuesta estrictamente en el siguiente formato JSON:
-{
-  "name": "Nombre corto descriptivo de la consulta",
-  "sql": "Código SQL formateado y listo para ejecutar",
-  "explanation": "Breve explicación de una línea sobre cómo funciona la consulta"
-}
-
-No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON.
-
-Esquema actual de base de datos:
-${JSON.stringify(currentState || { tables: [], relationships: [] })}
-${currentQuerySql ? `\nConsulta SQL actual a modificar:\n${currentQuerySql}` : ''}`;
+      promptTemplate = aiPrompts.mode_query_generate;
     } else if (mode === 'query_suggest') {
-      systemInstruction = `Eres un administrador de bases de datos y desarrollador SQL experto.
-Analiza el esquema de base de datos suministrado y sugiere 3 consultas SQL de negocio o analíticas útiles (ej. reportes, acumulados, cruces de información).
-Para cada sugerencia, proporciona un nombre y un prompt descriptivo en español que el usuario pueda usar para generar la consulta.
-
-Debes devolver la respuesta estrictamente en el siguiente formato JSON de arreglo:
-[
-  {
-    "name": "ej: Usuarios con más compras",
-    "prompt": "ej: Muestra los top 5 usuarios con mayor volumen de compras y sus datos de perfil"
-  },
-  ...
-]
-
-No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON.
-
-Esquema de base de datos:
-${JSON.stringify(currentState || { tables: [], relationships: [] })}`;
+      promptTemplate = aiPrompts.mode_query_suggest;
     } else if (mode === 'query_explain') {
-      systemInstruction = `Eres un administrador de bases de datos y profesor SQL experto.
-Tu tarea es explicar de manera clara y detallada cómo funciona la consulta SQL proporcionada por el usuario.
-El motor de base de datos es: ${engine || 'PostgreSQL'}.
-
-Debes explicar:
-1. Qué hace la consulta paso a paso (SELECT, FROM, JOINs, WHERE, GROUP BY, ORDER BY, etc.)
-2. Qué tablas y campos involucra y por qué
-3. Si usa JOINs, explica el tipo de JOIN y cómo conecta las tablas
-4. Si tiene funciones de agregación, subconsultas o CTEs, explícalas
-5. Posibles optimizaciones o mejoras si las detectas
-
-Devuelve la respuesta estrictamente en el siguiente formato JSON:
-{
-  "explanation": "Explicación detallada y bien formateada de la consulta"
-}
-
-No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON. Responde en español.
-
-Esquema actual de base de datos:
-${JSON.stringify(currentState || { tables: [], relationships: [] })}`;
+      promptTemplate = aiPrompts.mode_query_explain;
     } else {
-      systemInstruction = `Eres un diseñador de bases de datos experto. Genera un esquema de base de datos ERD desde cero que responda a la solicitud del usuario en el siguiente formato JSON estricto. No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
-
-${expectedSchemaText}
-
-Reglas importantes:
-1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
-2. Cada tabla debe tener una clave primaria (isPK: true).
-3. Todas las relaciones referenciadas en 'relationships' deben usar IDs de tablas y campos existentes en el JSON.
-4. Asigna coordenadas x e y, así como dimensiones de grupos y tablas de forma distribuida de acuerdo con estas directrices:
-${layoutRulesText}
-`;
+      promptTemplate = aiPrompts.mode_create;
     }
 
-    let requestBody = '';
+    const stateStr = JSON.stringify(currentState || { tables: [], relationships: [], groups: [] });
+    const currentQuerySqlStr = currentQuerySql ? `\nConsulta SQL actual a modificar:\n${currentQuerySql}` : '';
+
+    const systemInstruction = promptTemplate
+      .replace(/{expectedSchemaText}/g, aiPrompts.expectedSchemaText)
+      .replace(/{layoutRulesText}/g, aiPrompts.layoutRulesText)
+      .replace(/{currentState}/g, stateStr)
+      .replace(/{engine}/g, engine || 'PostgreSQL')
+      .replace(/{currentQuerySql}/g, currentQuerySqlStr);
+
     let options = {};
     let clientModule = https;
 
@@ -483,22 +549,8 @@ ${layoutRulesText}
 // Helper para solicitar la documentación detallada en Markdown a la IA
 function makeAiDocRequest({ provider, apiKey, apiUrl, model, currentState }) {
   return new Promise((resolve, reject) => {
-    const prompt = `Genera una documentación en Markdown (.md) elegante, detallada y profesional para el siguiente esquema de base de datos JSON.
-
-Esquema JSON de la Base de Datos:
-${JSON.stringify(currentState || { tables: [], relationships: [] }, null, 2)}
-
-La documentación debe incluir:
-1. Un título principal llamativo.
-2. Una introducción que describa conceptualmente el propósito general del sistema basándote en las tablas encontradas.
-3. Un índice de contenidos.
-4. Por cada tabla:
-   - Su nombre y una breve descripción de su función.
-   - Una tabla Markdown con sus campos, detallando: Nombre de columna, Tipo de dato, Llaves (PK/FK), si permite Nulos (NULL/NOT NULL), Valor por defecto (si lo tiene) y una descripción detallada que supongas para qué sirve ese campo.
-5. Una sección de Relaciones y Reglas de Negocio, describiendo qué tabla se relaciona con cuál y la cardinalidad.
-6. Un bloque de diagrama Mermaid que ilustre visualmente las relaciones entre tablas (usando la sintaxis erDiagram de Mermaid).
-
-Asegúrate de que la salida sea estrictamente Markdown limpio para poder ser guardado como un archivo .md. No agregues explicaciones fuera del bloque Markdown.`;
+    const stateStr = JSON.stringify(currentState || { tables: [], relationships: [] }, null, 2);
+    const prompt = aiPrompts.prompt_document.replace(/{currentState}/g, stateStr);
 
     let requestBody = '';
     let options = {};
@@ -678,6 +730,46 @@ function cleanJsonResponseText(text) {
 
 // HTTP Server to serve static files and API endpoints
 const server = http.createServer((req, res) => {
+  // GET /api/ai/prompts - Obtener los prompts configurados
+  if (req.method === 'GET' && req.url === '/api/ai/prompts') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(aiPrompts));
+    return;
+  }
+
+  // POST /api/ai/prompts - Guardar o restablecer prompts
+  if (req.method === 'POST' && req.url === '/api/ai/prompts') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body);
+        if (payload.reset) {
+          aiPrompts = { ...DEFAULT_PROMPTS };
+        } else {
+          // Copiar valores recibidos válidos
+          const keys = Object.keys(DEFAULT_PROMPTS);
+          for (const key of keys) {
+            if (payload[key] !== undefined) {
+              aiPrompts[key] = payload[key];
+            }
+          }
+        }
+        
+        fs.writeFileSync(PROMPTS_FILE, JSON.stringify(aiPrompts, null, 2), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, prompts: aiPrompts }));
+      } catch (err) {
+        console.error('Error al guardar prompts:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   // POST /api/ai/generate - Proxy de Inteligencia Artificial
   if (req.method === 'POST' && req.url === '/api/ai/generate') {
     let body = '';
