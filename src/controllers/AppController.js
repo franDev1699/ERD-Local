@@ -123,6 +123,20 @@ export class AppController {
     // Load or setup user identity
     await this.setupUserIdentity();
 
+    // Check if there is a name param in URL for new local project initialization (fallback if offline)
+    const urlParams = new URLSearchParams(window.location.search);
+    const nameParam = urlParams.get('name');
+    if (nameParam) {
+      const state = this.stateManager.getState();
+      if (!state.name || state.name === 'Mi Diagrama Local') {
+        state.name = nameParam.trim();
+        this.stateManager.setState(state, false);
+      }
+      // Clean URL parameters without reloading
+      const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?project=${this.projectId}`;
+      window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
+    }
+
     // Initial Render & Setup
     this.refreshUI();
     this.interactionController.init();
@@ -181,7 +195,18 @@ export class AppController {
     if (data.type === 'init_state') {
       if (data.payload) {
         if (data.payload.state) {
-          this.stateManager.setState(data.payload.state, true);
+          let state = data.payload.state;
+          const urlParams = new URLSearchParams(window.location.search);
+          const nameParam = urlParams.get('name');
+          if (nameParam && (!state.name || state.name === 'Mi Diagrama Local')) {
+            state.name = nameParam.trim();
+            // Clean up the URL to remove the name param so it looks nice and doesn't override future renames on refresh
+            const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?project=${this.projectId}`;
+            window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
+            this.stateManager.setState(state, false);
+          } else {
+            this.stateManager.setState(state, true);
+          }
         }
         if (data.payload.shareUrl) {
           const shareInput = document.getElementById("share-link-input");
@@ -212,6 +237,11 @@ export class AppController {
       this.sidebarEditor.renderGroupEditor(group, state.groups);
     } else {
       this.sidebarEditor.render(state.tables, this.selectedTableIds, state.groups);
+    }
+    
+    const projectTitle = document.getElementById("project-title");
+    if (projectTitle && projectTitle.contentEditable !== "true") {
+      projectTitle.textContent = state.name || "Mi Diagrama Local";
     }
     
     this.updateHistoryButtons();
@@ -1029,7 +1059,9 @@ export class AppController {
 
     if (btnDownloadMarkdown && markdownTextArea) {
       btnDownloadMarkdown.addEventListener("click", () => {
-        const defaultName = `documentacion_${this.projectId || 'db'}_${new Date().toLocaleDateString().replace(/\//g, "-")}.md`;
+        const name = this.stateManager.getState().name || this.projectId || 'db';
+        const cleanName = name.trim().replace(/[^a-z0-9_-]/gi, "_");
+        const defaultName = `documentacion_${cleanName}_${new Date().toISOString().split('T')[0]}.md`;
         const dataStr = "data:text/markdown;charset=utf-8," + encodeURIComponent(markdownTextArea.value);
         ExportService._downloadFile(dataStr, defaultName);
         this.uiManager.showToast("Archivo Markdown descargado.", "success");
@@ -1084,7 +1116,7 @@ export class AppController {
     const btnSaveProject = document.getElementById("btn-save-project");
     if (btnSaveProject) {
       btnSaveProject.addEventListener("click", async () => {
-        const defaultName = `proyecto_erd_${new Date().toLocaleDateString().replace(/\//g, "-")}`;
+        const defaultName = this.stateManager.getState().name || `proyecto_erd_${new Date().toISOString().split('T')[0]}`;
         const fileName = await this.uiManager.prompt("Ingresa el nombre para guardar el proyecto:", defaultName, "Guardar Proyecto");
         if (fileName && fileName.trim()) {
           const cleanName = fileName.trim().replace(/[^a-z0-9_-]/gi, "_");
@@ -1200,8 +1232,17 @@ export class AppController {
         projectTitle.style.padding = "0";
         const newName = projectTitle.textContent.trim();
         if (!newName) {
-           projectTitle.textContent = "Mi Diagrama Local";
+           projectTitle.textContent = this.stateManager.getState().name || "Mi Diagrama Local";
+           return;
         }
+        
+        const state = this.stateManager.getState();
+        this.history.push(state);
+        this.stateManager.setState({
+          ...state,
+          name: newName
+        });
+        
         this.uiManager.showToast("Nombre del proyecto actualizado.", "success");
       };
 
@@ -1405,7 +1446,7 @@ export class AppController {
 
         card.addEventListener("click", (e) => {
           if (e.target.closest(".project-card-delete")) return;
-          window.location.search = `?project=${encodeURIComponent(project.name)}`;
+          window.location.search = `?project=${encodeURIComponent(project.id)}`;
         });
 
         const btnDelete = card.querySelector(".project-card-delete");
@@ -1414,7 +1455,7 @@ export class AppController {
           const confirmed = await this.uiManager.confirm(`¿Estás seguro de que deseas eliminar el proyecto "${project.name}"? Esta acción borrará permanentemente todos sus archivos.`, "Eliminar Proyecto");
           if (confirmed) {
             try {
-              const res = await fetch(`/api/delete-project?project=${encodeURIComponent(project.name)}`, { method: "POST" });
+              const res = await fetch(`/api/delete-project?project=${encodeURIComponent(project.id)}`, { method: "POST" });
               const result = await res.json();
               if (result.success) {
                 this.uiManager.showToast(`Proyecto "${project.name}" eliminado.`, "success");
@@ -1444,8 +1485,8 @@ export class AppController {
   async createNewProject() {
     const name = await this.uiManager.prompt("Nombre del nuevo proyecto:", "", "Nuevo Proyecto");
     if (name && name.trim()) {
-      const cleanName = name.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
-      window.location.search = `?project=${encodeURIComponent(cleanName)}`;
+      const projectId = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      window.location.search = `?project=${encodeURIComponent(projectId)}&name=${encodeURIComponent(name.trim())}`;
     }
   }
 

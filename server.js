@@ -547,13 +547,14 @@ const server = http.createServer((req, res) => {
       const projectsList = [];
       files.forEach(file => {
         if (file.endsWith('.json') && !file.includes('.backup_') && !file.endsWith('.tmp')) {
-          const projectName = file.slice(0, -5);
+          const projectId = file.slice(0, -5);
           try {
             const filePath = path.join(PROJECTS_DIR, file);
             const stats = fs.statSync(filePath);
             const state = JSON.parse(fs.readFileSync(filePath, 'utf8'));
             projectsList.push({
-              name: projectName,
+              id: projectId,
+              name: state.name || projectId,
               tableCount: state.tables ? state.tables.length : 0,
               relationshipCount: state.relationships ? state.relationships.length : 0,
               lastModified: stats.mtime
@@ -647,9 +648,28 @@ function broadcastUserList(projectId) {
   const room = rooms.get(projectId);
   if (!room) return;
 
-  const activeUsers = Array.from(room)
+  // Clean up any destroyed or unwritable sockets first
+  room.forEach(c => {
+    if (c.socket.destroyed || !c.socket.writable) {
+      c.state = 0; // CLOSED
+      room.delete(c);
+    }
+  });
+
+  if (room.size === 0) {
+    rooms.delete(projectId);
+    return;
+  }
+
+  // De-duplicate active users by userId
+  const uniqueUsersMap = new Map();
+  Array.from(room)
     .filter(c => c.state === 1 && c.user && c.user.userId)
-    .map(c => c.user);
+    .forEach(c => {
+      uniqueUsersMap.set(c.user.userId, c.user);
+    });
+
+  const activeUsers = Array.from(uniqueUsersMap.values());
 
   room.forEach(c => {
     if (c.state === 1) {

@@ -2,8 +2,10 @@
 
 export class ExportService {
   static exportToJson(state) {
+    const name = state.name || "diagrama_erd";
+    const cleanName = name.trim().replace(/[^a-z0-9_-]/gi, "_");
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state, null, 2));
-    this._downloadFile(dataStr, "diagrama_erd.json");
+    this._downloadFile(dataStr, `${cleanName}.json`);
   }
 
   static exportToSql(state, dialect = 'mysql') {
@@ -195,7 +197,9 @@ export class ExportService {
       }
 
       const image = canvas.toDataURL(mimeType);
-      this._downloadFile(image, `screenshot_erd.${extension}`);
+      const name = appState.name || "screenshot_erd";
+      const cleanName = name.trim().replace(/[^a-z0-9_-]/gi, "_");
+      this._downloadFile(image, `${cleanName}.${extension}`);
     } catch (err) {
       setZoomFn(previousZoom);
       throw err;
