@@ -149,12 +149,14 @@ export class AppController {
     this.setupSidebarResizer();
     
     // Si hay tablas, centrar vista en el contenido; si no, centrar canvas vacío
-    const initTables = this.stateManager.getState().tables;
-    if (initTables && initTables.length > 0) {
-      this.canvasManager.fitToContent(initTables);
-    } else {
-      this.canvasManager.centerCanvas();
-    }
+    setTimeout(() => {
+      const initTables = this.stateManager.getState().tables;
+      if (initTables && initTables.length > 0) {
+        this.canvasManager.fitToContent(initTables);
+      } else {
+        this.canvasManager.centerCanvas();
+      }
+    }, 100);
     this.setupAiModal();
     this.setupQueryManager();
   }
@@ -1640,8 +1642,32 @@ export class AppController {
       });
     }
 
-    // Escape Key Handler for Cancelling connections & closing modals
+    // Global Key Listener for undo/redo shortcuts
     window.addEventListener("keydown", (e) => {
+      const target = e.target;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      const isZ = e.key.toLowerCase() === "z";
+      const isY = e.key.toLowerCase() === "y";
+      const hasModifier = e.ctrlKey || e.metaKey;
+
+      if (hasModifier && isZ) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          this.redo();
+        } else {
+          this.undo();
+        }
+      } else if (hasModifier && isY) {
+        e.preventDefault();
+        this.redo();
+      }
     });
   }
 

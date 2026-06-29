@@ -430,7 +430,7 @@ input[type="text"]:focus, select:focus {
   max-width: 200px;
 }
 
-.btn-icon.btn-toolbar {
+.btn-icon.btn-tb {
   background-color: rgba(255, 255, 255, 0.08);
   border: none;
   padding: 8px;
@@ -445,46 +445,128 @@ input[type="text"]:focus, select:focus {
   transition: all 0.15s;
 }
 
-.btn-icon.btn-toolbar:hover {
+.btn-icon.btn-tb:hover {
   background-color: var(--color-primary);
   color: white;
 }
 
-.btn-icon.btn-toolbar i {
+.btn-icon.btn-tb i {
   width: 16px;
   height: 16px;
 }
 
 .toolbar-right {
   display: flex;
-  gap: 10px;
+  gap: 16px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
-.btn-toolbar {
+.tb-group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.tb-group:not(:last-child) {
+  border-right: 1px solid var(--color-border);
+  padding-right: 16px;
+}
+
+.tb-group-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.tb-group-label i {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.0;
+}
+
+.tb-group-buttons {
+  display: flex;
+  gap: 4px;
+  background-color: rgba(0, 0, 0, 0.15);
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.btn-tb {
   background-color: var(--color-bg-card);
   border: 1px solid var(--color-border);
   color: var(--color-text-muted);
-  padding: 8px 12px;
-  font-size: 0.8rem;
-  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  border-radius: 4px;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 6px;
   font-weight: 500;
   transition: all 0.15s;
+  height: 28px;
 }
 
-.btn-toolbar:hover {
+.btn-tb:hover {
   background-color: var(--color-bg-card-hover);
   color: var(--color-text-main);
   border-color: var(--color-border-hover);
 }
 
-.btn-toolbar i {
-  width: 14px;
-  height: 14px;
+.btn-tb i {
+  width: 13px;
+  height: 13px;
+}
+
+/* Specific button styles for visual differentiation */
+.btn-tb.btn-project {
+  border-color: rgba(16, 185, 129, 0.15); /* Subtle green border for project actions */
+}
+.btn-tb.btn-project:hover {
+  border-color: var(--color-success-light);
+  color: var(--color-success-light);
+}
+
+.btn-tb.btn-export {
+  border-color: rgba(59, 130, 246, 0.15); /* Subtle blue border for export actions */
+}
+.btn-tb.btn-export:hover {
+  border-color: #60a5fa;
+  color: #60a5fa;
+}
+
+.btn-tb.btn-ai-action {
+  border-color: rgba(139, 92, 246, 0.25); /* Purple border for AI actions */
+  background: rgba(139, 92, 246, 0.03);
+}
+.btn-tb.btn-ai-action:hover {
+  border-color: #a78bfa;
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.1);
+}
+
+/* Primary AI button custom styling */
+.btn-tb.btn-ai {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  color: #a78bfa !important;
+  font-weight: 600;
+}
+.btn-tb.btn-ai:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.35) 0%, rgba(139, 92, 246, 0.35) 100%);
+  border-color: rgba(139, 92, 246, 0.7);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.2) !important;
 }
 
 /* Canvas Container */
@@ -2174,5 +2256,19 @@ select option {
   color: #a78bfa;
 }
 
+/* Bootstrap Compatibility Overrides */
+.btn {
+  box-shadow: none !important;
+  text-transform: none;
+  vertical-align: middle;
+}
 
+.btn-primary, .btn-secondary, .btn-danger, .btn-danger-outline {
+  border-color: transparent;
+}
 
+/* Ensure Bootstrap body variables respect our custom styles */
+:root {
+  --bs-body-bg: var(--color-bg-app);
+  --bs-body-color: var(--color-text-main);
+}

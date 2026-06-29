@@ -62,7 +62,7 @@ export class CanvasManager {
     const centerX = minX + (maxX - minX) / 2;
     const centerY = minY + (maxY - minY) / 2;
 
-    this.container.scrollLeft = (centerX * newZoom) - (canvasWidth / 2);
-    this.container.scrollTop = (centerY * newZoom) - (canvasHeight / 2);
+    this.container.scrollLeft = (centerX * newZoom) - (this.container.clientWidth / 2);
+    this.container.scrollTop = (centerY * newZoom) - (this.container.clientHeight / 2);
   }
 }
