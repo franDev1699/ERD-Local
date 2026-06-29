@@ -11,6 +11,7 @@ export class InteractionController {
     
     // Callbacks from AppController
     this.onTableSelect = config.onTableSelect;
+    this.onFieldSelect = config.onFieldSelect;
     this.onGroupSelect = config.onGroupSelect;
     this.onHistoryPush = config.onHistoryPush;
     this.onRelationshipAdd = config.onRelationshipAdd;
@@ -158,7 +159,23 @@ export class InteractionController {
         return;
       }
 
-      // 3. Table general click -> Selection only
+      // 3. Field Row click -> Select table and scroll to field in sidebar
+      const fieldRowEl = e.target.closest(".erd-field-row");
+      if (fieldRowEl) {
+        e.stopPropagation();
+        const tableEl = fieldRowEl.closest(".erd-table");
+        if (tableEl) {
+          const tableId = tableEl.dataset.id;
+          const fieldId = fieldRowEl.dataset.fieldId;
+          this.onTableSelect(tableId, e.shiftKey || e.ctrlKey);
+          if (this.onFieldSelect) {
+            this.onFieldSelect(tableId, fieldId);
+          }
+        }
+        return;
+      }
+
+      // 4. Table general click -> Selection only
       const tableEl = e.target.closest(".erd-table");
       if (tableEl) {
         e.stopPropagation();

@@ -21,6 +21,34 @@ export class SidebarEditor {
     this._dragFieldData = null;
   }
 
+  scrollToTable(tableId) {
+    setTimeout(() => {
+      const item = this.container.querySelector(`.table-accordion-item[data-id="${tableId}"]`);
+      if (item) {
+        item.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 100);
+  }
+
+  scrollToField(tableId, fieldId) {
+    setTimeout(() => {
+      const item = this.container.querySelector(
+        `.table-accordion-item[data-id="${tableId}"] .field-editor-item[data-field-id="${fieldId}"]`
+      );
+      if (item) {
+        item.scrollIntoView({ behavior: "smooth", block: "center" });
+        
+        // Highlight the field briefly
+        const originalBg = item.style.backgroundColor;
+        item.style.transition = "background-color 0.3s";
+        item.style.backgroundColor = "rgba(99, 102, 241, 0.25)";
+        setTimeout(() => {
+          item.style.backgroundColor = originalBg;
+        }, 1000);
+      }
+    }, 150);
+  }
+
   render(tables, selectedTableIds, groups = []) {
     this.container.innerHTML = "";
 

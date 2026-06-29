@@ -837,6 +837,11 @@ input[type="text"]:focus, select:focus {
   transition: opacity 0.2s ease;
 }
 
+#custom-confirm-modal,
+#custom-prompt-modal {
+  z-index: 950;
+}
+
 .modal.hidden {
   display: none;
   opacity: 0;
