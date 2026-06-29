@@ -50,13 +50,12 @@ export class SidebarEditor {
   }
 
   render(tables, selectedTableIds, groups = []) {
-    this.container.innerHTML = "";
-
     const selectedSet = selectedTableIds instanceof Set 
       ? selectedTableIds 
       : new Set(selectedTableIds ? [selectedTableIds] : []);
 
     if (selectedSet.size > 1) {
+      this.container.innerHTML = "";
       this.renderBatchEditor(selectedSet, tables, groups);
       return;
     }
@@ -64,21 +63,128 @@ export class SidebarEditor {
     if (tables.length === 0) {
       this.container.innerHTML = `
         <div class="editor-empty">
-          <i data-lucide="mouse-pointer-click" class="empty-icon"></i>
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="empty-icon"><path d="m9 9 5 12 1.774-5.226L21 14 9 9z"/><path d="m16.071 16.071 4.243 4.243"/><path d="m7.188 2.239.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656-2.12 2.122"/></svg>
           <p>No hay tablas en el diagrama. Agrega una nueva tabla para empezar.</p>
         </div>
       `;
-      if (window.lucide) window.lucide.createIcons();
       return;
     }
 
+    // Differential update: reuse existing DOM structure when possible
+    const existingItems = this.container.querySelectorAll('.table-accordion-item');
+    const existingMap = new Map();
+    existingItems.forEach(item => existingMap.set(item.dataset.id, item));
+
+    const fragment = document.createDocumentFragment();
+    const newIds = new Set();
+
     tables.forEach(table => {
+      newIds.add(table.id);
       const isExpanded = selectedSet.has(table.id);
-      const accordionItem = this._createAccordionItem(table, isExpanded, groups);
-      this.container.appendChild(accordionItem);
+      const existing = existingMap.get(table.id);
+
+      if (existing) {
+        const wasExpanded = existing.classList.contains('expanded');
+        if (isExpanded === wasExpanded && !isExpanded) {
+          // Collapsed and unchanged — update name only if needed
+          const h3 = existing.querySelector('h3');
+          if (h3 && h3.textContent !== table.name) h3.textContent = table.name;
+          fragment.appendChild(existing);
+          return;
+        }
+      }
+
+      // Full or expanded item — rebuild
+      if (isExpanded) {
+        const accordionItem = this._createAccordionItem(table, true, groups);
+        fragment.appendChild(accordionItem);
+      } else {
+        // Lightweight stub for collapsed items (minimal DOM)
+        const stub = this._createCollapsedStub(table);
+        fragment.appendChild(stub);
+      }
     });
 
-    if (window.lucide) window.lucide.createIcons();
+    this.container.innerHTML = '';
+    this.container.appendChild(fragment);
+
+    // Only call lucide for the few expanded items that use data-lucide
+    if (selectedSet.size > 0 && window.lucide) window.lucide.createIcons();
+  }
+
+  /**
+   * Creates a minimal collapsed accordion header — very lightweight for 400+ tables.
+   */
+  _createCollapsedStub(table) {
+    const item = document.createElement('div');
+    item.className = 'table-accordion-item';
+    item.dataset.id = table.id;
+
+    const header = document.createElement('div');
+    header.className = 'table-accordion-header';
+    header.innerHTML = `
+      <div class="drag-handle"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg></div>
+      <h3>${table.name}</h3>
+      <span class="field-count-badge">${table.fields.length}</span>
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+    `;
+
+    header.addEventListener('click', (e) => {
+      if (!e.target.closest('.drag-handle')) {
+        this.onTableSelect(table.id);
+      }
+    });
+
+    // Support dropping fields onto collapsed stubs
+    item.addEventListener('dragover', (e) => {
+      if (!this._dragFieldData) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+      item.classList.add('drop-target-active');
+
+      if (!this._expandTimeout) {
+        this._expandTimeout = setTimeout(() => {
+          this.onTableSelect(table.id);
+          this._expandTimeout = null;
+        }, 600);
+      }
+    });
+
+    item.addEventListener('dragleave', (e) => {
+      if (!item.contains(e.relatedTarget)) {
+        item.classList.remove('drop-target-active');
+        if (this._expandTimeout) {
+          clearTimeout(this._expandTimeout);
+          this._expandTimeout = null;
+        }
+      }
+    });
+
+    item.addEventListener('drop', (e) => {
+      if (!this._dragFieldData) return;
+      e.preventDefault();
+      e.stopPropagation();
+      item.classList.remove('drop-target-active');
+      if (this._expandTimeout) {
+        clearTimeout(this._expandTimeout);
+        this._expandTimeout = null;
+      }
+
+      const { fieldId: draggedFieldId, sourceTableId } = this._dragFieldData;
+      const targetTableId = table.id;
+      const targetIndex = table.fields.length;
+      const isCopy = e.ctrlKey;
+
+      if (isCopy) {
+        if (this.onFieldCopy) this.onFieldCopy(sourceTableId, draggedFieldId, targetTableId, targetIndex);
+      } else {
+        if (this.onFieldMove) this.onFieldMove(sourceTableId, draggedFieldId, targetTableId, targetIndex);
+      }
+      this._dragFieldData = null;
+    });
+
+    item.appendChild(header);
+    return item;
   }
 
   _createAccordionItem(table, isExpanded, groups = []) {

@@ -6,6 +6,10 @@ export class StateManager {
     this.state.groups = this.state.groups || [];
     this.state.queries = this.state.queries || [];
     this.onStateChange = onStateChange;
+
+    // Debounce timer for heavy persistence operations
+    this._saveTimer = null;
+    this._SAVE_DELAY = 300; // ms — debounce window for rapid changes (e.g. dragging)
   }
 
   getState() {
@@ -178,9 +182,26 @@ export class StateManager {
     this.notify();
   }
 
+  /**
+   * Standard notify — triggers immediate UI refresh + debounced persistence/broadcast.
+   * UI update fires instantly; save/broadcast is delayed to coalesce rapid changes.
+   */
   notify() {
     if (this.onStateChange) {
       this.onStateChange(this.state, false);
     }
+  }
+
+  /**
+   * Debounced notify — for high-frequency operations like dragging.
+   * Only fires the callback after the action settles.
+   */
+  notifyDebounced() {
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(() => {
+      if (this.onStateChange) {
+        this.onStateChange(this.state, false);
+      }
+    }, this._SAVE_DELAY);
   }
 }

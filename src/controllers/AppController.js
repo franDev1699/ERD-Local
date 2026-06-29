@@ -25,6 +25,10 @@ export class AppController {
     // Services
     this.storage = new StorageService(this.projectId);
     this.webSocket = new WebSocketService(config.wsUrl);
+
+    // Debounce timers for persistence
+    this._saveDebounceTimer = null;
+    this._SAVE_DEBOUNCE_MS = 400;
     
     // Parse pending project name from URL params if exists
     const urlParams = new URLSearchParams(window.location.search);
@@ -195,32 +199,57 @@ export class AppController {
   }
 
   handleStateChange(newState, isRemote = false) {
-    this.storage.save(newState);
-    if (!isRemote) {
-      this.collabController.broadcastState(newState);
-    }
+    // Immediate: UI refresh (cheap with diff-based renderer)
     this.refreshUI();
+
+    // Debounced: heavy persistence + broadcast
+    if (this._saveDebounceTimer) clearTimeout(this._saveDebounceTimer);
+    this._saveDebounceTimer = setTimeout(() => {
+      this.storage.save(newState);
+      if (!isRemote) {
+        this.collabController.broadcastState(newState);
+      }
+    }, this._SAVE_DEBOUNCE_MS);
   }
 
+  /**
+   * Full UI refresh — canvas + sidebar + title + history buttons.
+   */
   refreshUI() {
+    this.refreshCanvas();
+    this.refreshSidebar();
+    
+    const projectTitle = document.getElementById("project-title");
+    if (projectTitle && projectTitle.contentEditable !== "true") {
+      const state = this.stateManager.getState();
+      projectTitle.textContent = state.name || "Mi Diagrama Local";
+    }
+    
+    this.updateHistoryButtons();
+    this.queryController.renderQueriesList();
+  }
+
+  /**
+   * Lightweight canvas-only refresh (tables + connections + groups).
+   * Does NOT re-render the sidebar — use for drag/zoom/position changes.
+   */
+  refreshCanvas() {
     const state = this.stateManager.getState();
     const zoom = this.canvasManager.getZoom();
     this.renderer.render(state, this.selectedTableIds, this.selectedGroupId, zoom);
-    
+  }
+
+  /**
+   * Sidebar-only refresh.
+   */
+  refreshSidebar() {
+    const state = this.stateManager.getState();
     if (this.selectedGroupId) {
       const group = state.groups.find(g => g.id === this.selectedGroupId);
       this.sidebarEditor.renderGroupEditor(group, state.groups);
     } else {
       this.sidebarEditor.render(state.tables, this.selectedTableIds, state.groups);
     }
-    
-    const projectTitle = document.getElementById("project-title");
-    if (projectTitle && projectTitle.contentEditable !== "true") {
-      projectTitle.textContent = state.name || "Mi Diagrama Local";
-    }
-    
-    this.updateHistoryButtons();
-    this.queryController.renderQueriesList();
   }
 
   selectTable(tableId, isCumulative = false) {
@@ -1063,7 +1092,7 @@ export class AppController {
             this.canvasManager.getZoom(),
             (z) => {
               this.canvasManager.setZoom(z);
-              this.refreshUI();
+              this.refreshCanvas();
             }
           );
           this.uiManager.showToast("Imagen descargada.", "success");
@@ -1381,7 +1410,7 @@ export class AppController {
     if (btnZoomIn) {
       btnZoomIn.addEventListener("click", () => {
         this.canvasManager.setZoom(this.canvasManager.getZoom() + 0.1);
-        this.refreshUI();
+        this.refreshCanvas();
       });
     }
 
@@ -1389,7 +1418,7 @@ export class AppController {
     if (btnZoomOut) {
       btnZoomOut.addEventListener("click", () => {
         this.canvasManager.setZoom(this.canvasManager.getZoom() - 0.1);
-        this.refreshUI();
+        this.refreshCanvas();
       });
     }
 
@@ -1397,7 +1426,7 @@ export class AppController {
     if (btnZoomFit) {
       btnZoomFit.addEventListener("click", () => {
         this.canvasManager.fitToContent(this.stateManager.getState().tables);
-        this.refreshUI();
+        this.refreshCanvas();
         this.uiManager.showToast("Ajustado al lienzo", "info");
       });
     }

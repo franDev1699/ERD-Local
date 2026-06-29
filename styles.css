@@ -682,8 +682,10 @@ input[type="text"]:focus, select:focus {
   overflow: visible;
   pointer-events: auto;
   z-index: 3;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s ease-out;
+  transition: border-color 0.15s, box-shadow 0.15s;
   cursor: default;
+  will-change: transform, left, top;
+  contain: layout style;
 }
 
 .erd-table:hover {
@@ -1456,16 +1458,31 @@ select option {
   margin: 0;
 }
 
-.table-accordion-header i {
+.table-accordion-header i,
+.table-accordion-header > svg {
   color: var(--color-text-muted);
   transition: transform 0.2s;
   width: 16px;
   height: 16px;
+  flex-shrink: 0;
 }
 
-.table-accordion-item.expanded .table-accordion-header i {
+.table-accordion-item.expanded .table-accordion-header i,
+.table-accordion-item.expanded .table-accordion-header > svg {
   transform: rotate(180deg);
   color: var(--color-primary-light);
+}
+
+.field-count-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: rgba(255,255,255,0.06);
+  padding: 2px 7px;
+  border-radius: 10px;
+  margin-left: auto;
+  margin-right: 8px;
+  flex-shrink: 0;
 }
 
 .table-accordion-content {
