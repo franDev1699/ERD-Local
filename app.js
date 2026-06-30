@@ -8,19 +8,7 @@ const config = {
   projectId,
   wsUrl: `ws://${window.location.hostname}:3000${projectId ? `/?project=${encodeURIComponent(projectId)}` : ''}`,
   defaultState: {
-    tables: [
-      {
-        id: "tbl-users",
-        name: "usuarios",
-        x: 100,
-        y: 100,
-        groupId: null,
-        fields: [
-          { id: "f-u-1", name: "id", type: "INT", isPK: true },
-          { id: "f-u-2", name: "nombre", type: "VARCHAR(255)", isPK: false }
-        ]
-      }
-    ],
+    tables: [],
     relationships: [],
     groups: [],
     queries: []

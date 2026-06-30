@@ -9,8 +9,12 @@
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-		<!-- Lucide Icons (lightweight alternative for modern icons) -->
-		<script src="https://unpkg.com/lucide@latest"></script>
+		<script src="https://cdn.jsdelivr.net/npm/lucide@latest"></script>
+		<script>
+			if (!window.lucide) {
+				document.write('<script src="https://unpkg.com/lucide@latest"><\/script>');
+			}
+		</script>
 		<!-- html2canvas (CDN for exporting canvas to PNG) -->
 		<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 		<!-- Bootstrap 5 CSS -->

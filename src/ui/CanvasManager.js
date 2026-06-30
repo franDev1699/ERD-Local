@@ -7,7 +7,7 @@ export class CanvasManager {
     this.zoomText = config.zoomText;
     
     this.zoom = 1.0;
-    this.ZOOM_MIN = 0.4;
+    this.ZOOM_MIN = 0.1;
     this.ZOOM_MAX = 1.5;
   }
 
@@ -44,17 +44,17 @@ export class CanvasManager {
       if (table.x + 240 > maxX) maxX = table.x + 240;
       if (table.y < minY) minY = table.y;
       
-      const tableHeight = 50 + table.fields.length * 28;
+      const tableHeight = 50 + (table.fields ? table.fields.length * 28 : 0);
       if (table.y + tableHeight > maxY) maxY = table.y + tableHeight;
     });
 
-    const canvasWidth = this.canvas.clientWidth;
-    const canvasHeight = this.canvas.clientHeight;
+    const viewportWidth = this.container.clientWidth || 1000;
+    const viewportHeight = this.container.clientHeight || 800;
     const contentWidth = (maxX - minX) + padding * 2;
     const contentHeight = (maxY - minY) + padding * 2;
 
-    const scaleX = canvasWidth / contentWidth;
-    const scaleY = canvasHeight / contentHeight;
+    const scaleX = viewportWidth / contentWidth;
+    const scaleY = viewportHeight / contentHeight;
     const newZoom = Math.min(scaleX, scaleY, 1.0);
 
     this.setZoom(newZoom);

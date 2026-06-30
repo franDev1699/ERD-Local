@@ -229,12 +229,59 @@ export class AppController {
     this.queryController.renderQueriesList();
   }
 
+  adjustCanvasSizeToContent(tables, groups) {
+    if (!tables || tables.length === 0) {
+      const canvas = this.canvasManager.canvas;
+      if (canvas) {
+        canvas.style.width = '3000px';
+        canvas.style.height = '3000px';
+      }
+      return;
+    }
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    tables.forEach(table => {
+      if (table.x < minX) minX = table.x;
+      if (table.x + 240 > maxX) maxX = table.x + 240;
+      const tableHeight = 52 + (table.fields ? table.fields.length * 32 : 0) + 16;
+      if (table.y + tableHeight > maxY) maxY = table.y + tableHeight;
+    });
+
+    if (groups && groups.length > 0) {
+      groups.forEach(group => {
+        if (group.x < minX) minX = group.x;
+        if (group.x + (group.width || 300) > maxX) maxX = group.x + (group.width || 300);
+        if (group.y < minY) minY = group.y;
+        if (group.y + (group.height || 200) > maxY) maxY = group.y + (group.height || 200);
+      });
+    }
+
+    if (!isFinite(minX)) return;
+
+    // To keep the content centered, the canvas width/height must be symmetric around the content center.
+    // Hence, canvas width = maxX + minX, canvas height = maxY + minY.
+    // We enforce a minimum of 3000px.
+    const canvasWidth = Math.max(3000, maxX + minX);
+    const canvasHeight = Math.max(3000, maxY + minY);
+
+    const canvas = this.canvasManager.canvas;
+    if (canvas) {
+      canvas.style.width = `${canvasWidth}px`;
+      canvas.style.height = `${canvasHeight}px`;
+    }
+  }
+
   /**
    * Lightweight canvas-only refresh (tables + connections + groups).
    * Does NOT re-render the sidebar — use for drag/zoom/position changes.
    */
   refreshCanvas() {
     const state = this.stateManager.getState();
+    this.adjustCanvasSizeToContent(state.tables, state.groups);
     const zoom = this.canvasManager.getZoom();
     this.renderer.render(state, this.selectedTableIds, this.selectedGroupId, zoom);
   }
@@ -710,9 +757,7 @@ export class AppController {
   }
 
   centerContentOnCanvas(tables, groups) {
-    const CANVAS_SIZE = 3000;
-    const CANVAS_CENTER = CANVAS_SIZE / 2;
-    const PADDING = 100;
+    if (!tables || tables.length === 0) return;
 
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
@@ -740,34 +785,33 @@ export class AppController {
     const contentCenterX = minX + contentWidth / 2;
     const contentCenterY = minY + contentHeight / 2;
 
-    const dx = CANVAS_CENTER - contentCenterX;
-    const dy = CANVAS_CENTER - contentCenterY;
+    const PADDING = 1000;
+    const canvasWidth = Math.max(5000, contentWidth + PADDING * 2);
+    const canvasHeight = Math.max(5000, contentHeight + PADDING * 2);
 
-    const finalMinX = minX + dx;
-    const finalMinY = minY + dy;
-    const finalMaxX = maxX + dx;
-    const finalMaxY = maxY + dy;
+    const canvas = this.canvasManager.canvas;
+    if (canvas) {
+      canvas.style.width = `${canvasWidth}px`;
+      canvas.style.height = `${canvasHeight}px`;
+    }
 
-    let adjustX = 0, adjustY = 0;
-    if (finalMinX < PADDING) adjustX = PADDING - finalMinX;
-    if (finalMinY < PADDING) adjustY = PADDING - finalMinY;
-    if (finalMaxX > CANVAS_SIZE - PADDING) adjustX = (CANVAS_SIZE - PADDING) - finalMaxX;
-    if (finalMaxY > CANVAS_SIZE - PADDING) adjustY = (CANVAS_SIZE - PADDING) - finalMaxY;
+    const canvasCenterX = canvasWidth / 2;
+    const canvasCenterY = canvasHeight / 2;
 
-    const totalDx = dx + adjustX;
-    const totalDy = dy + adjustY;
+    const dx = canvasCenterX - contentCenterX;
+    const dy = canvasCenterY - contentCenterY;
 
-    if (Math.abs(totalDx) < 1 && Math.abs(totalDy) < 1) return;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
 
     tables.forEach(table => {
-      table.x += totalDx;
-      table.y += totalDy;
+      table.x += dx;
+      table.y += dy;
     });
 
     if (groups && groups.length > 0) {
       groups.forEach(group => {
-        group.x += totalDx;
-        group.y += totalDy;
+        group.x += dx;
+        group.y += dy;
       });
     }
   }
@@ -1264,11 +1308,20 @@ export class AppController {
               const importedState = JSON.parse(event.target.result);
               if (importedState.tables && Array.isArray(importedState.tables)) {
                 this.history.push(this.stateManager.getState());
+                
+                // Centrar contenido para que esté bien posicionado y no tenga coordenadas negativas
+                this.centerContentOnCanvas(importedState.tables, importedState.groups || []);
+
                 this.stateManager.setState({
                   tables: importedState.tables,
                   relationships: importedState.relationships || [],
                   groups: importedState.groups || []
                 });
+                
+                setTimeout(() => {
+                  this.canvasManager.fitToContent(importedState.tables);
+                }, 100);
+
                 this.uiManager.showToast("Proyecto importado correctamente.", "success");
               } else {
                 this.uiManager.showToast("Formato de archivo inválido.", "error");

@@ -48,6 +48,12 @@ export class InteractionController {
     this.isPanning = false;
     this.panStart = { x: 0, y: 0 };
     this.panScrollStart = { x: 0, y: 0 };
+
+    // Throttle for expensive redraws during drag
+    this._dragRenderTimer = null;
+    this._DRAG_RENDER_INTERVAL = 50; // ms
+    // DOM element cache for dragged tables
+    this._draggedTableElements = new Map();
   }
 
   init() {
@@ -154,6 +160,13 @@ export class InteractionController {
             startPosition: { x: mainTable.x, y: mainTable.y }
           });
         }
+
+        // Cache DOM elements for dragged tables via Renderer's O(1) Map
+        this._draggedTableElements.clear();
+        this.draggedTables.forEach(item => {
+          const el = this.renderer.getTableElement(item.id);
+          if (el) this._draggedTableElements.set(item.id, el);
+        });
 
         document.body.style.userSelect = "none";
         return;
@@ -346,6 +359,11 @@ export class InteractionController {
 
         this.draggedTableId = null;
         this.draggedTables = [];
+        this._draggedTableElements.clear();
+        if (this._dragRenderTimer) {
+          clearTimeout(this._dragRenderTimer);
+          this._dragRenderTimer = null;
+        }
         document.body.style.userSelect = "auto";
       }
 
@@ -455,9 +473,11 @@ export class InteractionController {
     let newX = (e.clientX - canvasRect.left - this.dragOffset.x) / zoom;
     let newY = (e.clientY - canvasRect.top - this.dragOffset.y) / zoom;
 
-    // Boundaries for the dragged header table
-    newX = Math.max(0, Math.min(2760, newX));
-    newY = Math.max(0, Math.min(2800, newY));
+    const canvasWidth = this.dom.erdCanvas.clientWidth || 3000;
+    const canvasHeight = this.dom.erdCanvas.clientHeight || 3000;
+
+    newX = Math.max(0, Math.min(canvasWidth - 240, newX));
+    newY = Math.max(0, Math.min(canvasHeight - 100, newY));
 
     const dx = newX - this.draggedTableStartPosition.x;
     const dy = newY - this.draggedTableStartPosition.y;
@@ -468,11 +488,11 @@ export class InteractionController {
     this.draggedTables.forEach(item => {
       const table = state.tables.find(t => t.id === item.id);
       if (table) {
-        table.x = Math.max(0, Math.min(2760, item.startPosition.x + dx));
-        table.y = Math.max(0, Math.min(2800, item.startPosition.y + dy));
+        table.x = Math.max(0, Math.min(canvasWidth - 240, item.startPosition.x + dx));
+        table.y = Math.max(0, Math.min(canvasHeight - 100, item.startPosition.y + dy));
 
-        // Live update DOM positions
-        const el = document.querySelector(`.erd-table[data-id="${item.id}"]`);
+        // Live update DOM positions using cached elements
+        const el = this._draggedTableElements.get(item.id);
         if (el) {
           el.style.left = `${table.x}px`;
           el.style.top = `${table.y}px`;
@@ -480,8 +500,13 @@ export class InteractionController {
       }
     });
 
-    // Redraw SVG connections live
-    this.renderer.renderConnections(state.relationships);
+    // Throttled SVG connection redraw
+    if (!this._dragRenderTimer) {
+      this._dragRenderTimer = setTimeout(() => {
+        this._dragRenderTimer = null;
+        this.renderer.renderConnections(state.relationships);
+      }, this._DRAG_RENDER_INTERVAL);
+    }
   }
 
   _handleConnectionDrag(e) {
@@ -512,12 +537,35 @@ export class InteractionController {
   }
 
   _getPortCenter(portEl) {
-    const canvasRect = this.dom.erdCanvas.getBoundingClientRect();
-    const portRect = portEl.getBoundingClientRect();
-    const zoom = this.canvasManager.getZoom();
+    const rowEl = portEl.closest('.erd-field-row');
+    const tableEl = portEl.closest('.erd-table');
+    if (!rowEl || !tableEl) {
+      const canvasRect = this.dom.erdCanvas.getBoundingClientRect();
+      const portRect = portEl.getBoundingClientRect();
+      const zoom = this.canvasManager.getZoom();
+      return {
+        x: (portRect.left - canvasRect.left + portRect.width / 2) / zoom,
+        y: (portRect.top - canvasRect.top + portRect.height / 2) / zoom
+      };
+    }
+
+    const tableX = parseFloat(tableEl.style.left) || 0;
+    const tableY = parseFloat(tableEl.style.top) || 0;
+    
+    const isLeft = portEl.classList.contains('port-left');
+    const relativeX = isLeft ? 0 : 240;
+    
+    let relativeY = rowEl.offsetTop;
+    let parent = rowEl.offsetParent;
+    while (parent && parent !== tableEl) {
+      relativeY += parent.offsetTop;
+      parent = parent.offsetParent;
+    }
+    relativeY += (rowEl.offsetHeight / 2 || 16);
+
     return {
-      x: (portRect.left - canvasRect.left + portRect.width / 2) / zoom,
-      y: (portRect.top - canvasRect.top + portRect.height / 2) / zoom
+      x: tableX + relativeX,
+      y: tableY + relativeY
     };
   }
 
@@ -562,19 +610,23 @@ export class InteractionController {
     let newX = (e.clientX - canvasRect.left - this.dragOffset.x) / zoom;
     let newY = (e.clientY - canvasRect.top - this.dragOffset.y) / zoom;
 
-    // Boundaries
-    newX = Math.max(0, Math.min(2700, newX));
-    newY = Math.max(0, Math.min(2700, newY));
-
     // Update state directly for smooth drag
     const state = this.stateManager.getState();
     const group = state.groups.find(g => g.id === this.draggedGroupId);
     if (group) {
+      const canvasWidth = this.dom.erdCanvas.clientWidth || 3000;
+      const canvasHeight = this.dom.erdCanvas.clientHeight || 3000;
+      const groupWidth = group.width || 300;
+      const groupHeight = group.height || 200;
+
+      newX = Math.max(0, Math.min(canvasWidth - groupWidth, newX));
+      newY = Math.max(0, Math.min(canvasHeight - groupHeight, newY));
+
       group.x = newX;
       group.y = newY;
       
-      // Live update DOM position
-      const groupEl = document.querySelector(`.erd-group[data-id="${this.draggedGroupId}"]`);
+      // Live update DOM position (O(1) cache lookup)
+      const groupEl = this.renderer.getGroupElement(this.draggedGroupId);
       if (groupEl) {
         groupEl.style.left = `${newX}px`;
         groupEl.style.top = `${newY}px`;
@@ -587,8 +639,8 @@ export class InteractionController {
           table.x = newX + item.startOffset.x;
           table.y = newY + item.startOffset.y;
 
-          // Live update DOM position
-          const tableEl = document.querySelector(`.erd-table[data-id="${item.id}"]`);
+          // Live update DOM position (O(1) cache lookup)
+          const tableEl = this.renderer.getTableElement(item.id);
           if (tableEl) {
             tableEl.style.left = `${table.x}px`;
             tableEl.style.top = `${table.y}px`;
@@ -596,8 +648,13 @@ export class InteractionController {
         }
       });
       
-      // Redraw SVG connections live
-      this.renderer.renderConnections(state.relationships);
+      // Throttled SVG connection redraw
+      if (!this._dragRenderTimer) {
+        this._dragRenderTimer = setTimeout(() => {
+          this._dragRenderTimer = null;
+          this.renderer.renderConnections(state.relationships);
+        }, this._DRAG_RENDER_INTERVAL);
+      }
     }
   }
 
@@ -615,8 +672,8 @@ export class InteractionController {
       group.width = newWidth;
       group.height = newHeight;
 
-      // Live update DOM dimensions
-      const groupEl = document.querySelector(`.erd-group[data-id="${this.resizingGroupId}"]`);
+      // Live update DOM dimensions (O(1) cache lookup)
+      const groupEl = this.renderer.getGroupElement(this.resizingGroupId);
       if (groupEl) {
         groupEl.style.width = `${newWidth}px`;
         groupEl.style.height = `${newHeight}px`;

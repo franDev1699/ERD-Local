@@ -21,6 +21,16 @@ export class Renderer {
     this._groupSnapshots = new Map();
   }
 
+  /** O(1) cached DOM element lookup by table ID */
+  getTableElement(tableId) {
+    return this._tableElements.get(tableId) || null;
+  }
+
+  /** O(1) cached DOM element lookup by group ID */
+  getGroupElement(groupId) {
+    return this._groupElements.get(groupId) || null;
+  }
+
   render(appState, selectedTableIds, selectedGroupId, zoom = 1.0) {
     this.zoom = zoom;
     this.renderGroups(appState, selectedGroupId);
@@ -260,12 +270,35 @@ export class Renderer {
   }
 
   getPortCenter(portEl) {
-    const { erdCanvas } = this.elements;
-    const canvasRect = erdCanvas.getBoundingClientRect();
-    const portRect = portEl.getBoundingClientRect();
+    const rowEl = portEl.closest('.erd-field-row');
+    const tableEl = portEl.closest('.erd-table');
+    if (!rowEl || !tableEl) {
+      const { erdCanvas } = this.elements;
+      const canvasRect = erdCanvas.getBoundingClientRect();
+      const portRect = portEl.getBoundingClientRect();
+      return {
+        x: (portRect.left - canvasRect.left + portRect.width / 2) / this.zoom,
+        y: (portRect.top - canvasRect.top + portRect.height / 2) / this.zoom
+      };
+    }
+
+    const tableX = parseFloat(tableEl.style.left) || 0;
+    const tableY = parseFloat(tableEl.style.top) || 0;
+    
+    const isLeft = portEl.classList.contains('port-left');
+    const relativeX = isLeft ? 0 : 240;
+    
+    let relativeY = rowEl.offsetTop;
+    let parent = rowEl.offsetParent;
+    while (parent && parent !== tableEl) {
+      relativeY += parent.offsetTop;
+      parent = parent.offsetParent;
+    }
+    relativeY += (rowEl.offsetHeight / 2 || 16);
+
     return {
-      x: (portRect.left - canvasRect.left + portRect.width / 2) / this.zoom,
-      y: (portRect.top - canvasRect.top + portRect.height / 2) / this.zoom
+      x: tableX + relativeX,
+      y: tableY + relativeY
     };
   }
 

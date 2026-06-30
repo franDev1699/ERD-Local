@@ -1190,25 +1190,13 @@ server.on('upgrade', (req, socket) => {
 
   console.log(`Nuevo compañero conectado al proyecto: "${projectId}"`);
 
-  // Load project state
   let projectState = loadProjectState(projectId);
   if (!projectState) {
     projectState = {
-      tables: [
-        {
-          id: "tbl-users",
-          name: "usuarios",
-          x: 100,
-          y: 100,
-          groupId: null,
-          fields: [
-            { id: "f-u-1", name: "id", type: "INT", isPK: true },
-            { id: "f-u-2", name: "nombre", type: "VARCHAR(255)", isPK: false }
-          ]
-        }
-      ],
+      tables: [],
       relationships: [],
-      groups: []
+      groups: [],
+      queries: []
     };
     saveProjectState(projectId, projectState);
   }
@@ -1223,6 +1211,7 @@ server.on('upgrade', (req, socket) => {
   });
 
   let buffer = Buffer.alloc(0);
+  let messageBuffer = '';
 
   socket.on('data', (chunk) => {
     buffer = Buffer.concat([buffer, chunk]);
@@ -1237,48 +1226,55 @@ server.on('upgrade', (req, socket) => {
         break;
       }
 
-      if (parsed.opcode === 1) { // TEXT frame
-        try {
-          const data = JSON.parse(parsed.payload);
-          
-          if (data.type === 'join') {
-            client.user = {
-              userId: data.payload.userId,
-              username: data.payload.username,
-              color: data.payload.color
-            };
-            broadcastUserList(projectId);
-          } else if (data.type === 'cursor_move') {
-            // Broadcast cursor coordinates to everyone else in the project
-            room.forEach((c) => {
-              if (c.socket !== socket && c.state === 1 && client.user.userId) {
-                sendFrame(c.socket, {
-                  type: 'cursor_update',
-                  payload: {
-                    userId: client.user.userId,
-                    username: client.user.username,
-                    color: client.user.color,
-                    x: data.payload.x,
-                    y: data.payload.y
-                  }
-                });
-              }
-            });
-          } else if (data.type === 'update_state') {
-            saveProjectState(projectId, data.payload);
+      if (parsed.opcode === 1 || parsed.opcode === 0) { // TEXT or CONTINUATION frame
+        messageBuffer += parsed.payload;
 
-            // Broadcast state update to all other open clients in this project
-            room.forEach((c) => {
-              if (c.socket !== socket && c.state === 1) {
-                sendFrame(c.socket, {
-                  type: 'sync_state',
-                  payload: data.payload
-                });
-              }
-            });
+        if (parsed.fin) {
+          const completeMessage = messageBuffer;
+          messageBuffer = ''; // Reset for next message
+
+          try {
+            const data = JSON.parse(completeMessage);
+            
+            if (data.type === 'join') {
+              client.user = {
+                userId: data.payload.userId,
+                username: data.payload.username,
+                color: data.payload.color
+              };
+              broadcastUserList(projectId);
+            } else if (data.type === 'cursor_move') {
+              // Broadcast cursor coordinates to everyone else in the project
+              room.forEach((c) => {
+                if (c.socket !== socket && c.state === 1 && client.user.userId) {
+                  sendFrame(c.socket, {
+                    type: 'cursor_update',
+                    payload: {
+                      userId: client.user.userId,
+                      username: client.user.username,
+                      color: client.user.color,
+                      x: data.payload.x,
+                      y: data.payload.y
+                    }
+                  });
+                }
+              });
+            } else if (data.type === 'update_state') {
+              saveProjectState(projectId, data.payload);
+
+              // Broadcast state update to all other open clients in this project
+              room.forEach((c) => {
+                if (c.socket !== socket && c.state === 1) {
+                  sendFrame(c.socket, {
+                    type: 'sync_state',
+                    payload: data.payload
+                  });
+                }
+              });
+            }
+          } catch (e) {
+            console.error('Error procesando mensaje WebSocket:', e);
           }
-        } catch (e) {
-          console.error('Error procesando mensaje WebSocket:', e);
         }
       }
     }
@@ -1311,6 +1307,7 @@ function parseFrame(buffer) {
   const firstByte = buffer[0];
   const secondByte = buffer[1];
 
+  const fin = (firstByte & 0x80) !== 0;
   const opcode = firstByte & 0x0F;
   const masked = (secondByte & 0x80) !== 0;
 
@@ -1345,6 +1342,7 @@ function parseFrame(buffer) {
   }
 
   return {
+    fin,
     opcode,
     payload: payload.toString('utf8'),
     frameLength: offset + payloadLength

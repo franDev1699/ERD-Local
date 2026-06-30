@@ -71,12 +71,26 @@ export class CollabController {
           const nameParam = this.pendingProjectName;
           if (nameParam && (!state.name || state.name === 'Mi Diagrama Local')) {
             state.name = nameParam;
-            this.pendingProjectName = null; // Consume it
+            this.pendingProjectName = null;
             const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?project=${this.projectId}`;
             window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
             this.stateManager.setState(state, false);
           } else {
             this.stateManager.setState(state, true);
+          }
+
+          // After initial state load, fit viewport to content so all tables are visible
+          const tables = state.tables;
+          if (tables && tables.length > 0) {
+            // Double rAF: first applies zoom, second re-renders connections with correct coords
+            requestAnimationFrame(() => {
+              this.canvasManager.fitToContent(tables);
+              requestAnimationFrame(() => {
+                if (this.onIncomingStateReset) {
+                  this.onIncomingStateReset();
+                }
+              });
+            });
           }
         }
         if (data.payload.shareUrl) {
