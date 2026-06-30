@@ -151,10 +151,22 @@ export class AppController {
       const initTables = this.stateManager.getState().tables;
       if (initTables && initTables.length > 0) {
         this.canvasManager.fitToContent(initTables);
+        // Usar doble requestAnimationFrame para garantizar que el navegador
+        // haya procesado el cambio de zoom y aplicado el layout a todas las tablas
+        // antes de calcular las coordenadas de las relaciones (conexiones)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            this.refreshCanvas();
+          });
+        });
       } else {
         this.canvasManager.centerCanvas();
       }
-    }, 100);
+      // Inicializar todos los iconos de Lucide una vez cargada la interfaz
+      if (window.lucide) {
+        window.lucide.createIcons();
+      }
+    }, 200);
 
     // Setup query manager and AI configurations
     this.queryController.init();
@@ -247,6 +259,7 @@ export class AppController {
     tables.forEach(table => {
       if (table.x < minX) minX = table.x;
       if (table.x + 240 > maxX) maxX = table.x + 240;
+      if (table.y < minY) minY = table.y;
       const tableHeight = 52 + (table.fields ? table.fields.length * 32 : 0) + 16;
       if (table.y + tableHeight > maxY) maxY = table.y + tableHeight;
     });
@@ -272,6 +285,12 @@ export class AppController {
     if (canvas) {
       canvas.style.width = `${canvasWidth}px`;
       canvas.style.height = `${canvasHeight}px`;
+    }
+
+    const connectionsSvg = this.renderer.elements.connectionsSvg;
+    if (connectionsSvg) {
+      connectionsSvg.setAttribute("width", canvasWidth);
+      connectionsSvg.setAttribute("height", canvasHeight);
     }
   }
 
@@ -998,6 +1017,13 @@ export class AppController {
 
     this.stateManager.notify();
     this.canvasManager.fitToContent(this.stateManager.getState().tables);
+    
+    // Volver a renderizar en el siguiente frame para asegurar que las relaciones
+    // se tracen con las nuevas coordenadas físicas ya maquetadas
+    requestAnimationFrame(() => {
+      this.refreshCanvas();
+    });
+
     this.uiManager.showToast("Tablas organizadas con éxito.", "success");
   }
 

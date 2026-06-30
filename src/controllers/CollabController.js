@@ -89,6 +89,10 @@ export class CollabController {
                 if (this.onIncomingStateReset) {
                   this.onIncomingStateReset();
                 }
+                // Ensure all Lucide icons are initialized after drawing the loaded state
+                if (window.lucide) {
+                  window.lucide.createIcons();
+                }
               });
             });
           }
