@@ -347,7 +347,7 @@ class ContextBuilder {
    * Parsea el prompt y el estado actual para filtrar/compactar la base de datos
    * que se envía como contexto al modelo de lenguaje.
    */
-  static build({ currentState, prompt, mode, contextDepth, currentQuerySql }) {
+  static build({ currentState, prompt, mode, contextDepth, currentQuerySql, selectedTableIds }) {
     if (!currentState || !currentState.tables) {
       return { tables: [], relationships: [], groups: [] };
     }
@@ -355,6 +355,35 @@ class ContextBuilder {
     const tables = currentState.tables;
     const relationships = currentState.relationships || [];
     const groups = currentState.groups || [];
+
+    // Estrategia para tablas seleccionadas específicamente
+    if (contextDepth === 'selected') {
+      const selectedIds = new Set(selectedTableIds || []);
+      const detailedTables = tables.filter(t => selectedIds.has(t.id));
+      const detailedTableIds = new Set(detailedTables.map(t => t.id));
+      
+      const filteredRelationships = relationships.filter(rel =>
+        detailedTableIds.has(rel.fromTable) && detailedTableIds.has(rel.toTable)
+      );
+
+      const detailedGroupIds = new Set(detailedTables.map(t => t.groupId).filter(Boolean));
+      const filteredGroups = groups.filter(g => detailedGroupIds.has(g.id));
+
+      const catalog = tables
+        .filter(t => !detailedTableIds.has(t.id))
+        .map(t => {
+          const pkFields = (t.fields || []).filter(f => f.isPK).map(f => f.name);
+          const fieldsStr = pkFields.length > 0 ? pkFields.join(',') : 'id';
+          return `${t.name}(${fieldsStr})`;
+        });
+
+      return {
+        tables: detailedTables,
+        relationships: filteredRelationships,
+        groups: filteredGroups,
+        catalog: catalog
+      };
+    }
 
     // Estrategia para diseño/layout (solo coordenadas y dimensiones)
     if (contextDepth === 'layout' || mode === 'layout') {
@@ -504,7 +533,7 @@ class ContextBuilder {
 }
 
 // Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa
-function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth }) {
+function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds }) {
   return new Promise((resolve, reject) => {
     let promptTemplate = '';
     if (mode === 'append') {
@@ -528,7 +557,8 @@ function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, 
       prompt,
       mode,
       contextDepth,
-      currentQuerySql
+      currentQuerySql,
+      selectedTableIds
     });
 
     let catalogInstruction = "";

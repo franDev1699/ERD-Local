@@ -82,7 +82,9 @@ export class AppController {
       uiManager: this.uiManager,
       history: this.history,
       canvasManager: this.canvasManager,
-      autoLayout: () => this.autoLayout()
+      autoLayout: () => this.autoLayout(),
+      getSelectedTableIds: () => this.selectedTableIds,
+      onTableSelect: (tableId, isCumulative) => this.selectTable(tableId, isCumulative)
     });
 
     this.collabController = new CollabController({

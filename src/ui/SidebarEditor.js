@@ -1,5 +1,35 @@
 // src/ui/SidebarEditor.js
 
+const TYPES_WITHOUT_LENGTH = new Set([
+  "BOOLEAN", 
+  "DATE", 
+  "DATETIME", 
+  "TIMESTAMP", 
+  "TIME", 
+  "YEAR",
+  "TINYTEXT", 
+  "TEXT", 
+  "MEDIUMTEXT", 
+  "LONGTEXT",
+  "TINYBLOB", 
+  "BLOB", 
+  "MEDIUMBLOB", 
+  "LONGBLOB",
+  "JSON", 
+  "UUID", 
+  "GEOMETRY", 
+  "POINT", 
+  "LINESTRING", 
+  "POLYGON",
+  "MULTIPOINT", 
+  "MULTILINESTRING", 
+  "MULTIPOLYGON", 
+  "GEOMETRYCOLLECTION",
+  "INET4", 
+  "INET6", 
+  "SERIAL"
+]);
+
 export class SidebarEditor {
   constructor(config) {
     this.container = config.container;
@@ -50,6 +80,12 @@ export class SidebarEditor {
   }
 
   render(tables, selectedTableIds, groups = []) {
+    const scrollTop = this.container ? this.container.scrollTop : 0;
+    
+    // Save scroll position of fields list if it exists
+    const fieldsListEl = this.container ? this.container.querySelector(".fields-list") : null;
+    const fieldsScrollTop = fieldsListEl ? fieldsListEl.scrollTop : 0;
+
     const selectedSet = selectedTableIds instanceof Set 
       ? selectedTableIds 
       : new Set(selectedTableIds ? [selectedTableIds] : []);
@@ -107,6 +143,15 @@ export class SidebarEditor {
 
     this.container.innerHTML = '';
     this.container.appendChild(fragment);
+    this.container.scrollTop = scrollTop;
+
+    // Restore scroll position of the new fields list if it exists
+    if (fieldsScrollTop) {
+      const newFieldsListEl = this.container.querySelector(".fields-list");
+      if (newFieldsListEl) {
+        newFieldsListEl.scrollTop = fieldsScrollTop;
+      }
+    }
 
     // Only call lucide for the few expanded items that use data-lucide
     if (selectedSet.size > 0 && window.lucide) window.lucide.createIcons();
@@ -448,12 +493,23 @@ export class SidebarEditor {
     const { baseType, length } = this._parseFieldType(field.type);
     const typeSelectHtml = this._getTypeSelectHtml(baseType);
 
+    const isNoLength = TYPES_WITHOUT_LENGTH.has(baseType);
+    const lengthVal = isNoLength ? "" : length;
+    const disabledAttr = isNoLength ? "disabled" : "";
+
+    // Proactive sanity check: if stored field type has invalid length (like BOOLEAN(255)), clean it up.
+    if (isNoLength && field.type !== baseType) {
+      setTimeout(() => {
+        this.onFieldUpdate(tableId, field.id, { type: baseType });
+      }, 0);
+    }
+
     item.innerHTML = `
       <div class="field-editor-row-main">
         <div class="field-drag-handle" title="Arrastrar para mover · Ctrl+Arrastrar para copiar"><i data-lucide="grip-vertical"></i></div>
         <input type="text" class="field-name-input" value="${field.name}" placeholder="nombre_campo">
         ${typeSelectHtml}
-        <input type="text" class="field-length-input" value="${length}" placeholder="Long." title="Longitud o Valores (ej: 255, 10,2 o 'a','b')">
+        <input type="text" class="field-length-input" value="${lengthVal}" placeholder="Long." title="Longitud o Valores (ej: 255, 10,2 o 'a','b')" ${disabledAttr}>
         <label class="field-checkbox-label ${pkChecked}" title="Llave Primaria (PK)">
           <input type="checkbox" class="field-pk-checkbox" ${field.isPK ? 'checked' : ''}>
           PK
@@ -584,8 +640,15 @@ export class SidebarEditor {
 
     const updateCombinedType = () => {
       const baseVal = typeSelect.value;
+      const isNoLength = TYPES_WITHOUT_LENGTH.has(baseVal);
+      if (isNoLength) {
+        lengthInput.value = "";
+        lengthInput.disabled = true;
+      } else {
+        lengthInput.disabled = false;
+      }
       const lenVal = lengthInput.value.trim();
-      const combined = lenVal ? `${baseVal}(${lenVal})` : baseVal;
+      const combined = (lenVal && !isNoLength) ? `${baseVal}(${lenVal})` : baseVal;
       this.onFieldUpdate(tableId, field.id, { type: combined });
     };
 
@@ -626,6 +689,7 @@ export class SidebarEditor {
   }
 
   renderGroupEditor(group, groups) {
+    const scrollTop = this.container ? this.container.scrollTop : 0;
     this.container.innerHTML = "";
 
     if (!group) {
@@ -717,10 +781,12 @@ export class SidebarEditor {
     editorEl.appendChild(deleteGroupBtn);
 
     this.container.appendChild(editorEl);
+    this.container.scrollTop = scrollTop;
     if (window.lucide) window.lucide.createIcons();
   }
 
   renderBatchEditor(selectedSet, tables, groups) {
+    const scrollTop = this.container ? this.container.scrollTop : 0;
     const count = selectedSet.size;
     const card = document.createElement("div");
     card.className = "batch-editor-panel";
@@ -769,6 +835,7 @@ export class SidebarEditor {
     });
 
     this.container.appendChild(card);
+    this.container.scrollTop = scrollTop;
     if (window.lucide) window.lucide.createIcons();
   }
 

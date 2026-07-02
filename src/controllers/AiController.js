@@ -2,12 +2,14 @@
 import { AiService } from '../services/AiService.js';
 
 export class AiController {
-  constructor({ stateManager, uiManager, history, canvasManager, autoLayout }) {
+  constructor({ stateManager, uiManager, history, canvasManager, autoLayout, getSelectedTableIds, onTableSelect }) {
     this.stateManager = stateManager;
     this.uiManager = uiManager;
     this.history = history;
     this.canvasManager = canvasManager;
     this.autoLayout = autoLayout;
+    this.getSelectedTableIds = getSelectedTableIds;
+    this.onTableSelect = onTableSelect;
   }
 
   init() {
@@ -41,6 +43,7 @@ export class AiController {
     const btnGenerate = document.getElementById("btn-ai-generate");
     const statusLog = document.getElementById("ai-status-log");
     const selectMode = document.getElementById("ai-generation-mode");
+    const selectContextDepth = document.getElementById("ai-context-depth");
 
     // Prompts Fields
     const selectPrompt = document.getElementById("ai-prompt-select");
@@ -98,10 +101,196 @@ export class AiController {
       loadPromptsFromServer();
     };
 
+    const renderAiTableCheckboxList = () => {
+      const listContainer = document.getElementById("ai-table-checkboxes-list");
+      if (!listContainer) return;
+      listContainer.innerHTML = "";
+
+      const state = this.stateManager.getState();
+      const tables = state.tables || [];
+      const groups = state.groups || [];
+      const selectedIds = this.getSelectedTableIds ? this.getSelectedTableIds() : new Set();
+
+      if (tables.length === 0) {
+        listContainer.innerHTML = `<span style="font-size: 0.8rem; color: var(--color-text-muted);">No hay tablas en el diagrama.</span>`;
+        return;
+      }
+
+      // Group tables by groupId
+      const tablesByGroup = {};
+      const ungroupedTables = [];
+
+      tables.forEach(table => {
+        if (table.groupId) {
+          if (!tablesByGroup[table.groupId]) {
+            tablesByGroup[table.groupId] = [];
+          }
+          tablesByGroup[table.groupId].push(table);
+        } else {
+          ungroupedTables.push(table);
+        }
+      });
+
+      const createCheckboxItem = (table) => {
+        const div = document.createElement("div");
+        div.className = "form-check";
+        div.style.display = "flex";
+        div.style.alignItems = "center";
+        div.style.gap = "8px";
+        div.style.paddingLeft = "4px";
+
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.className = "form-check-input";
+        input.id = `ai-chk-table-${table.id}`;
+        input.checked = selectedIds.has(table.id);
+        input.style.cursor = "pointer";
+
+        input.addEventListener("change", () => {
+          if (this.onTableSelect) {
+            this.onTableSelect(table.id, true);
+          }
+          updateContextDepthOptionText();
+        });
+
+        const label = document.createElement("label");
+        label.className = "form-check-label";
+        label.htmlFor = `ai-chk-table-${table.id}`;
+        label.textContent = table.name;
+        label.style.cursor = "pointer";
+        label.style.fontSize = "0.85rem";
+        label.style.color = "var(--color-text-main)";
+
+        div.appendChild(input);
+        div.appendChild(label);
+        return div;
+      };
+
+      const updateContextDepthOptionText = () => {
+        if (selectContextDepth) {
+          const selectedOption = selectContextDepth.querySelector('option[value="selected"]');
+          if (selectedOption) {
+            const currentSelected = this.getSelectedTableIds ? this.getSelectedTableIds() : new Set();
+            selectedOption.textContent = currentSelected.size > 0 ? `Solo tablas seleccionadas (${currentSelected.size})` : "Solo tablas seleccionadas (Seleccionar...)";
+          }
+        }
+      };
+
+      // 1. Render Grouped Tables
+      groups.forEach(group => {
+        const groupTables = tablesByGroup[group.id] || [];
+        if (groupTables.length === 0) return;
+
+        const groupDiv = document.createElement("div");
+        groupDiv.style.marginBottom = "8px";
+
+        const groupHeader = document.createElement("div");
+        groupHeader.style.fontSize = "0.75rem";
+        groupHeader.style.fontWeight = "600";
+        groupHeader.style.color = group.color || "var(--color-primary)";
+        groupHeader.style.marginBottom = "4px";
+        groupHeader.style.display = "flex";
+        groupHeader.style.alignItems = "center";
+        groupHeader.style.gap = "6px";
+        groupHeader.innerHTML = `<i data-lucide="folder" style="width: 12px; height: 12px; display: inline-block;"></i> ${group.name}`;
+        groupDiv.appendChild(groupHeader);
+
+        const itemsDiv = document.createElement("div");
+        itemsDiv.style.paddingLeft = "16px";
+        itemsDiv.style.display = "flex";
+        itemsDiv.style.flexDirection = "column";
+        itemsDiv.style.gap = "4px";
+
+        groupTables.forEach(table => {
+          itemsDiv.appendChild(createCheckboxItem(table));
+        });
+
+        groupDiv.appendChild(itemsDiv);
+        listContainer.appendChild(groupDiv);
+      });
+
+      // 2. Render Ungrouped Tables
+      if (ungroupedTables.length > 0) {
+        const ungroupedDiv = document.createElement("div");
+        ungroupedDiv.style.marginBottom = "8px";
+
+        if (groups.length > 0) {
+          const ungroupedHeader = document.createElement("div");
+          ungroupedHeader.style.fontSize = "0.75rem";
+          ungroupedHeader.style.fontWeight = "600";
+          ungroupedHeader.style.color = "var(--color-text-muted)";
+          ungroupedHeader.style.marginBottom = "4px";
+          ungroupedHeader.textContent = "Sin Grupo / Generales";
+          ungroupedDiv.appendChild(ungroupedHeader);
+        }
+
+        const itemsDiv = document.createElement("div");
+        if (groups.length > 0) {
+          itemsDiv.style.paddingLeft = "16px";
+        }
+        itemsDiv.style.display = "flex";
+        itemsDiv.style.flexDirection = "column";
+        itemsDiv.style.gap = "4px";
+
+        ungroupedTables.forEach(table => {
+          itemsDiv.appendChild(createCheckboxItem(table));
+        });
+
+        ungroupedDiv.appendChild(itemsDiv);
+        listContainer.appendChild(ungroupedDiv);
+      }
+
+      if (window.lucide) window.lucide.createIcons();
+    };
+
+    const updateContextDepthOptions = () => {
+      if (!selectContextDepth) return;
+      
+      let selectedOption = selectContextDepth.querySelector('option[value="selected"]');
+      if (!selectedOption) {
+        selectedOption = document.createElement("option");
+        selectedOption.value = "selected";
+        selectContextDepth.appendChild(selectedOption);
+      }
+
+      const selectedIds = this.getSelectedTableIds ? this.getSelectedTableIds() : new Set();
+      const count = selectedIds ? selectedIds.size : 0;
+      
+      selectedOption.disabled = false;
+      selectedOption.textContent = count > 0 ? `Solo tablas seleccionadas (${count})` : "Solo tablas seleccionadas (Seleccionar...)";
+
+      const tableSelectorGroup = document.getElementById("ai-table-selector-group");
+      if (selectContextDepth.value === "selected") {
+        if (tableSelectorGroup) tableSelectorGroup.classList.remove("hidden");
+        renderAiTableCheckboxList();
+      } else {
+        if (count > 0) {
+          selectContextDepth.value = "selected";
+          if (tableSelectorGroup) tableSelectorGroup.classList.remove("hidden");
+          renderAiTableCheckboxList();
+        } else {
+          if (tableSelectorGroup) tableSelectorGroup.classList.add("hidden");
+        }
+      }
+    };
+
+    if (selectContextDepth) {
+      selectContextDepth.addEventListener("change", () => {
+        const tableSelectorGroup = document.getElementById("ai-table-selector-group");
+        if (selectContextDepth.value === "selected") {
+          if (tableSelectorGroup) tableSelectorGroup.classList.remove("hidden");
+          renderAiTableCheckboxList();
+        } else {
+          if (tableSelectorGroup) tableSelectorGroup.classList.add("hidden");
+        }
+      });
+    }
+
     if (btnTrigger) {
       btnTrigger.addEventListener("click", () => {
         openConfigModal();
         switchTab("assistant");
+        updateContextDepthOptions();
         this.uiManager.openAiModal(modal);
       });
     }
@@ -397,7 +586,8 @@ export class AiController {
           
           // Realizar llamada al proxy
           const result = await AiService.generate(prompt, mode !== 'replace' ? currentState : null, mode, {
-            contextDepth: contextDepth
+            contextDepth: contextDepth,
+            selectedTableIds: this.getSelectedTableIds ? Array.from(this.getSelectedTableIds()) : []
           });
 
           if (!result || !result.tables || !Array.isArray(result.tables)) {

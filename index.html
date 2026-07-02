@@ -402,7 +402,14 @@
 									<option value="all">Enviar todo el diagrama (Sin optimizar)</option>
 									<option value="1" selected>Tablas mencionadas + Relaciones directas (Recomendado)</option>
 									<option value="2">Tablas mencionadas + Relaciones extendidas (2 niveles)</option>
+									<option value="selected">Solo tablas seleccionadas</option>
 								</select>
+								<div id="ai-table-selector-group" class="hidden" style="margin-top: 10px; border: 1px solid var(--color-border); border-radius: 6px; padding: 12px; background: var(--color-bg-app); max-height: 200px; overflow-y: auto;">
+									<label style="display: block; font-size: 0.8rem; color: var(--color-text-dim); margin-bottom: 8px; font-weight: 600;">Seleccionar tablas para el contexto:</label>
+									<div id="ai-table-checkboxes-list" style="display: flex; flex-direction: column; gap: 8px;">
+										<!-- Se poblará dinámicamente -->
+									</div>
+								</div>
 							</div>
 
 							<div>
