@@ -131,7 +131,8 @@ export class AppController {
       getSelectedTableIds: () => this.diagramController.selectedTableIds,
       getSelectedGroupId: () => this.diagramController.selectedGroupId,
       onHistoryPush: (prevState) => {
-        this.history.push(prevState || this.stateManager.getState());
+        const currentState = this.stateManager.getState();
+        this.history.push(prevState || currentState, currentState);
         this.toolbarController?.updateHistoryButtons();
       },
       onRelationshipAdd: (fromTable, fromField, toTable, toField) => {

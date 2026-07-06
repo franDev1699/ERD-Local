@@ -1214,7 +1214,8 @@ server.on('upgrade', (req, socket) => {
     socket, 
     state: 1, // 1 = OPEN
     projectId,
-    user: { userId: '', username: '', color: '' }
+    user: { userId: '', username: '', color: '' },
+    isAlive: true
   };
   room.add(client);
 
@@ -1256,6 +1257,16 @@ server.on('upgrade', (req, socket) => {
         break;
       }
 
+      if (parsed.opcode === 9) { // PING frame
+        sendFrame(socket, parsed.payload, 10); // respond with PONG frame
+        continue;
+      }
+
+      if (parsed.opcode === 10) { // PONG frame
+        client.isAlive = true;
+        continue;
+      }
+
       if (parsed.opcode === 1 || parsed.opcode === 0) { // TEXT or CONTINUATION frame
         messageBuffer += parsed.payload;
 
@@ -1266,7 +1277,10 @@ server.on('upgrade', (req, socket) => {
           try {
             const data = JSON.parse(completeMessage);
             
-            if (data.type === 'join') {
+            if (data.type === 'ping') {
+              // Respond to application-level ping
+              sendFrame(socket, { type: 'pong' });
+            } else if (data.type === 'join') {
               client.user = {
                 userId: data.payload.userId,
                 username: data.payload.username,
@@ -1350,8 +1364,12 @@ function parseFrame(buffer) {
     offset = 4;
   } else if (payloadLength === 127) {
     if (buffer.length < 10) return null;
-    // Read lower 32-bits for simplicity (diagrams are small enough)
-    payloadLength = buffer.readUInt32BE(6);
+    // Read 64-bit payload length
+    const bigLen = buffer.readBigUInt64BE(2);
+    if (bigLen > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error("Payload size exceeds maximum safe integer limits.");
+    }
+    payloadLength = Number(bigLen);
     offset = 10;
   }
 
@@ -1379,36 +1397,67 @@ function parseFrame(buffer) {
   };
 }
 
-// Helper to send outgoing unmasked WebSocket text frame
-function sendFrame(socket, obj) {
-  const payload = JSON.stringify(obj);
-  const payloadBuffer = Buffer.from(payload, 'utf8');
-  const payloadLength = payloadBuffer.length;
+// Helper to send outgoing unmasked WebSocket frame
+function sendFrame(socket, payload, opcode = 1) {
+  let payloadBuffer;
+  if (Buffer.isBuffer(payload)) {
+    payloadBuffer = payload;
+  } else if (typeof payload === 'object') {
+    payloadBuffer = Buffer.from(JSON.stringify(payload), 'utf8');
+  } else {
+    payloadBuffer = Buffer.from(String(payload), 'utf8');
+  }
 
+  const payloadLength = payloadBuffer.length;
   let header;
+
   if (payloadLength <= 125) {
     header = Buffer.alloc(2);
-    header[0] = 0x81; // FIN = 1, Opcode = 1 (text)
+    header[0] = 0x80 | opcode; // FIN = 1, Opcode
     header[1] = payloadLength;
   } else if (payloadLength <= 65535) {
     header = Buffer.alloc(4);
-    header[0] = 0x81;
+    header[0] = 0x80 | opcode;
     header[1] = 126;
     header.writeUInt16BE(payloadLength, 2);
   } else {
     header = Buffer.alloc(10);
-    header[0] = 0x81;
+    header[0] = 0x80 | opcode;
     header[1] = 127;
-    header.writeUInt32BE(0, 2); // high bits
-    header.writeUInt32BE(payloadLength, 6); // low bits
+    header.writeBigUInt64BE(BigInt(payloadLength), 2);
   }
 
   try {
-    socket.write(Buffer.concat([header, payloadBuffer]));
+    if (socket.writable) {
+      socket.write(Buffer.concat([header, payloadBuffer]));
+    }
   } catch (e) {
     console.error('Error escribiendo en socket:', e.message);
   }
 }
+
+// Server Keep-Alive Heartbeat Interval
+const serverHeartbeatInterval = setInterval(() => {
+  rooms.forEach((room, projectId) => {
+    room.forEach((client) => {
+      if (client.state === 1) {
+        if (client.isAlive === false) {
+          console.log(`Cliente inactivo desconectado por heartbeat del proyecto: "${projectId}"`);
+          client.socket.destroy();
+          client.state = 0;
+          room.delete(client);
+          broadcastUserList(projectId);
+        } else {
+          client.isAlive = false;
+          sendFrame(client.socket, '', 9); // Opcode 9 = PING frame
+        }
+      }
+    });
+    if (room.size === 0) {
+      rooms.delete(projectId);
+    }
+  });
+}, 35000);
 
 server.listen(PORT, () => {
   console.log(`\n======================================================`);

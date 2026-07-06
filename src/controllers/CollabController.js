@@ -11,27 +11,45 @@ export class CollabController {
     this.onIncomingStateReset = onIncomingStateReset;
     
     this.myUser = null;
+    this.isInitialConnection = true;
   }
 
   async initCollab() {
     // Setup WebSocket
     try {
-      await this.webSocket.connect();
       this.webSocket.onOpen(() => {
-        this.uiManager.showToast("Conectado al servidor", "success");
-        const badge = document.querySelector("#collab-status .collab-badge");
-        if (badge) {
-          badge.className = "collab-badge status-connected";
-          const text = document.getElementById("collab-status-text");
-          if (text) text.textContent = "Colaborativo";
+        if (this.isInitialConnection) {
+          this.uiManager.showToast("Conectado al servidor", "success");
+          this.isInitialConnection = false;
         }
+        this._updateCollabStatus(true, "Colaborativo");
         if (this.myUser) {
           this.webSocket.send({ type: 'join', payload: this.myUser });
         }
       });
+
       this.webSocket.onMessage((data) => this.handleIncomingSync(data));
+
+      this.webSocket.onReconnecting((attempt) => {
+        this._updateCollabStatus(false, `Conectando (${attempt}/5)`);
+      });
+
+      this.webSocket.onReconnected(() => {
+        this._updateCollabStatus(true, "Colaborativo");
+        if (this.myUser) {
+          this.webSocket.send({ type: 'join', payload: this.myUser });
+        }
+      });
+
+      this.webSocket.onDisconnect(() => {
+        this.uiManager.showToast("No se pudo conectar al servidor tras 5 intentos. Trabajando en modo local.", "error");
+        this._updateCollabStatus(false, "Modo Local");
+      });
+
+      await this.webSocket.connect();
     } catch (e) {
       console.warn("No se pudo conectar al WebSocket. Iniciando en modo local.", e);
+      this._updateCollabStatus(false, "Modo Local");
     }
 
     // Load or setup user identity
@@ -61,6 +79,15 @@ export class CollabController {
     if (this.webSocket.isConnected && this.myUser) {
       this.webSocket.send({ type: 'cursor_move', payload: coords });
     }
+  }
+
+  _updateCollabStatus(connected, text) {
+    const badge = document.querySelector("#collab-status .collab-badge");
+    if (badge) {
+      badge.className = connected ? "collab-badge status-connected" : "collab-badge status-disconnected";
+    }
+    const textEl = document.getElementById("collab-status-text");
+    if (textEl) textEl.textContent = text;
   }
 
   handleIncomingSync(data) {

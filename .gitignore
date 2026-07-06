@@ -3,3 +3,4 @@ shared_state.json
 shared_state.backup_*.json
 .gemini/
 SKILLS_CONFIG.md
+test.html
