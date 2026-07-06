@@ -47,7 +47,9 @@ export class ImportService {
           fromTable: fromTableId,
           fromField: fromFieldId,
           toTable: toTableId,
-          toField: toFieldId
+          toField: toFieldId,
+          onDelete: rel.onDelete || null,
+          onUpdate: rel.onUpdate || null
         });
       }
     });
@@ -312,12 +314,65 @@ export class ImportService {
               if (elStream.consume('(')) {
                 const toCol = elStream.consumeType('IDENTIFIER');
                 if (toCol) {
+                  elStream.consume(')');
+
+                  let onDelete = null;
+                  let onUpdate = null;
+
+                  while (true) {
+                    if (elStream.consume('ON')) {
+                      if (elStream.consume('DELETE')) {
+                        let action = "";
+                        const nextPeek = elStream.peek();
+                        if (nextPeek && nextPeek.type === 'IDENTIFIER') {
+                          action = nextPeek.value;
+                          elStream.next();
+                        } else if (elStream.consume('NO')) {
+                          action = 'NO';
+                        }
+                        if (action.toUpperCase() === 'NO' && elStream.consume('ACTION')) {
+                          action = 'NO ACTION';
+                        } else if (action.toUpperCase() === 'SET' && elStream.consume('NULL')) {
+                          action = 'SET NULL';
+                        } else if (action.toUpperCase() === 'SET' && elStream.consume('DEFAULT')) {
+                          action = 'SET DEFAULT';
+                        }
+                        onDelete = action;
+                      } else if (elStream.consume('UPDATE')) {
+                        let action = "";
+                        const nextPeek = elStream.peek();
+                        if (nextPeek && nextPeek.type === 'IDENTIFIER') {
+                          action = nextPeek.value;
+                          elStream.next();
+                        } else if (elStream.consume('NO')) {
+                          action = 'NO';
+                        }
+                        if (action.toUpperCase() === 'NO' && elStream.consume('ACTION')) {
+                          action = 'NO ACTION';
+                        } else if (action.toUpperCase() === 'SET' && elStream.consume('NULL')) {
+                          action = 'SET NULL';
+                        } else if (action.toUpperCase() === 'SET' && elStream.consume('DEFAULT')) {
+                          action = 'SET DEFAULT';
+                        }
+                        onUpdate = action;
+                      } else {
+                        elStream.next();
+                      }
+                    } else {
+                      break;
+                    }
+                  }
+
                   pendingRelationships.push({
                     fromTableName: tableName,
                     fromFieldName: fromCol.value,
                     toTableName: toTableName,
-                    toFieldName: toCol.value
+                    toFieldName: toCol.value,
+                    onDelete: onDelete,
+                    onUpdate: onUpdate
                   });
+                } else {
+                  elStream.consume(')');
                 }
               }
             }
@@ -433,14 +488,66 @@ export class ImportService {
           if (elStream.consume('(')) {
             const toCol = elStream.consumeType('IDENTIFIER');
             if (toCol) {
+              elStream.consume(')');
+
+              let onDelete = null;
+              let onUpdate = null;
+
+              while (true) {
+                if (elStream.consume('ON')) {
+                  if (elStream.consume('DELETE')) {
+                    let action = "";
+                    const nextPeek = elStream.peek();
+                    if (nextPeek && nextPeek.type === 'IDENTIFIER') {
+                      action = nextPeek.value;
+                      elStream.next();
+                    } else if (elStream.consume('NO')) {
+                      action = 'NO';
+                    }
+                    if (action.toUpperCase() === 'NO' && elStream.consume('ACTION')) {
+                      action = 'NO ACTION';
+                    } else if (action.toUpperCase() === 'SET' && elStream.consume('NULL')) {
+                      action = 'SET NULL';
+                    } else if (action.toUpperCase() === 'SET' && elStream.consume('DEFAULT')) {
+                      action = 'SET DEFAULT';
+                    }
+                    onDelete = action;
+                  } else if (elStream.consume('UPDATE')) {
+                    let action = "";
+                    const nextPeek = elStream.peek();
+                    if (nextPeek && nextPeek.type === 'IDENTIFIER') {
+                      action = nextPeek.value;
+                      elStream.next();
+                    } else if (elStream.consume('NO')) {
+                      action = 'NO';
+                    }
+                    if (action.toUpperCase() === 'NO' && elStream.consume('ACTION')) {
+                      action = 'NO ACTION';
+                    } else if (action.toUpperCase() === 'SET' && elStream.consume('NULL')) {
+                      action = 'SET NULL';
+                    } else if (action.toUpperCase() === 'SET' && elStream.consume('DEFAULT')) {
+                      action = 'SET DEFAULT';
+                    }
+                    onUpdate = action;
+                  } else {
+                    elStream.next();
+                  }
+                } else {
+                  break;
+                }
+              }
+
               pendingRelationships.push({
                 fromTableName: tableName,
                 fromFieldName: colNameTok.value,
                 toTableName: toTableName,
-                toFieldName: toCol.value
+                toFieldName: toCol.value,
+                onDelete: onDelete,
+                onUpdate: onUpdate
               });
+            } else {
+              elStream.consume(')');
             }
-            elStream.consume(')');
           }
         } else {
           elStream.next(); // Skip unknown token
@@ -502,14 +609,66 @@ export class ImportService {
             if (stream.consume('(')) {
               const toCol = stream.consumeType('IDENTIFIER');
               if (toCol) {
+                stream.consume(')');
+
+                let onDelete = null;
+                let onUpdate = null;
+
+                while (true) {
+                  if (stream.consume('ON')) {
+                    if (stream.consume('DELETE')) {
+                      let action = "";
+                      const nextPeek = stream.peek();
+                      if (nextPeek && nextPeek.type === 'IDENTIFIER') {
+                        action = nextPeek.value;
+                        stream.next();
+                      } else if (stream.consume('NO')) {
+                        action = 'NO';
+                      }
+                      if (action.toUpperCase() === 'NO' && stream.consume('ACTION')) {
+                        action = 'NO ACTION';
+                      } else if (action.toUpperCase() === 'SET' && stream.consume('NULL')) {
+                        action = 'SET NULL';
+                      } else if (action.toUpperCase() === 'SET' && stream.consume('DEFAULT')) {
+                        action = 'SET DEFAULT';
+                      }
+                      onDelete = action;
+                    } else if (stream.consume('UPDATE')) {
+                      let action = "";
+                      const nextPeek = stream.peek();
+                      if (nextPeek && nextPeek.type === 'IDENTIFIER') {
+                        action = nextPeek.value;
+                        stream.next();
+                      } else if (stream.consume('NO')) {
+                        action = 'NO';
+                      }
+                      if (action.toUpperCase() === 'NO' && stream.consume('ACTION')) {
+                        action = 'NO ACTION';
+                      } else if (action.toUpperCase() === 'SET' && stream.consume('NULL')) {
+                        action = 'SET NULL';
+                      } else if (action.toUpperCase() === 'SET' && stream.consume('DEFAULT')) {
+                        action = 'SET DEFAULT';
+                      }
+                      onUpdate = action;
+                    } else {
+                      stream.next();
+                    }
+                  } else {
+                    break;
+                  }
+                }
+
                 pendingRelationships.push({
                   fromTableName: tableName,
                   fromFieldName: fromCol.value,
                   toTableName: toTableName,
-                  toFieldName: toCol.value
+                  toFieldName: toCol.value,
+                  onDelete: onDelete,
+                  onUpdate: onUpdate
                 });
+              } else {
+                stream.consume(')');
               }
-              stream.consume(')');
             }
           }
         }

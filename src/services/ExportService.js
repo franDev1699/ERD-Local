@@ -106,15 +106,16 @@ export class ExportService {
       // Inline foreign key constraints for SQLite (since ALTER TABLE is limited)
       if (dialect === "sqlite") {
         state.relationships.forEach(rel => {
-          if (rel.fromTable === table.id) {
-            const fromField = table.fields.find(f => f.id === rel.fromField);
-            const targetTable = state.tables.find(t => t.id === rel.toTable);
-            if (targetTable) {
-              const targetField = targetTable.fields.find(f => f.id === rel.toField);
-              if (fromField && targetField) {
-                columnDefinitions.push(`  FOREIGN KEY (${fromField.name}) REFERENCES ${targetTable.name}(${targetField.name})`);
-              }
+          const norm = this._getNormalizedRelationship(rel, state);
+          if (norm && norm.fkTable.id === table.id) {
+            let cascadeStr = "";
+            if (rel.onDelete) {
+              cascadeStr += ` ON DELETE ${rel.onDelete.toUpperCase()}`;
             }
+            if (rel.onUpdate) {
+              cascadeStr += ` ON UPDATE ${rel.onUpdate.toUpperCase()}`;
+            }
+            columnDefinitions.push(`  FOREIGN KEY (${q(norm.fkField.name)}) REFERENCES ${q(norm.pkTable.name)}(${q(norm.pkField.name)})${cascadeStr}`);
           }
         });
       }
@@ -129,21 +130,21 @@ export class ExportService {
     if (dialect !== "sqlite") {
       let fkDdl = "";
       state.relationships.forEach(rel => {
-        const sourceTable = state.tables.find(t => t.id === rel.fromTable);
-        const targetTable = state.tables.find(t => t.id === rel.toTable);
-
-        if (sourceTable && targetTable) {
-          const sourceField = sourceTable.fields.find(f => f.id === rel.fromField);
-          const targetField = targetTable.fields.find(f => f.id === rel.toField);
-
-          if (sourceField && targetField) {
-            const constraintName = `fk_${sourceTable.name}_${sourceField.name}`;
-            fkDdl += `ALTER TABLE ${q(sourceTable.name)}\n`;
-            fkDdl += `  ADD CONSTRAINT ${q(constraintName)}\n`;
-            fkDdl += `  FOREIGN KEY (${q(sourceField.name)}) REFERENCES ${q(targetTable.name)}(${q(targetField.name)});\n`;
-            if (dialect === 'sqlserver') fkDdl += `GO\n`;
-            fkDdl += `\n`;
+        const norm = this._getNormalizedRelationship(rel, state);
+        if (norm) {
+          const constraintName = `fk_${norm.fkTable.name}_${norm.fkField.name}`;
+          let cascadeStr = "";
+          if (rel.onDelete) {
+            cascadeStr += ` ON DELETE ${rel.onDelete.toUpperCase()}`;
           }
+          if (rel.onUpdate) {
+            cascadeStr += ` ON UPDATE ${rel.onUpdate.toUpperCase()}`;
+          }
+          fkDdl += `ALTER TABLE ${q(norm.fkTable.name)}\n`;
+          fkDdl += `  ADD CONSTRAINT ${q(constraintName)}\n`;
+          fkDdl += `  FOREIGN KEY (${q(norm.fkField.name)}) REFERENCES ${q(norm.pkTable.name)}(${q(norm.pkField.name)})${cascadeStr};\n`;
+          if (dialect === 'sqlserver') fkDdl += `GO\n`;
+          fkDdl += `\n`;
         }
       });
 
@@ -228,5 +229,40 @@ export class ExportService {
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
+  }
+
+  static _getNormalizedRelationship(rel, state) {
+    const tableA = state.tables.find(t => t.id === rel.fromTable);
+    const tableB = state.tables.find(t => t.id === rel.toTable);
+    if (!tableA || !tableB) return null;
+
+    const fieldA = tableA.fields.find(f => f.id === rel.fromField);
+    const fieldB = tableB.fields.find(f => f.id === rel.toField);
+    if (!fieldA || !fieldB) return null;
+
+    if (fieldA.isPK && !fieldB.isPK) {
+      return {
+        fkTable: tableB,
+        fkField: fieldB,
+        pkTable: tableA,
+        pkField: fieldA
+      };
+    }
+
+    if (!fieldA.isPK && fieldB.isPK) {
+      return {
+        fkTable: tableA,
+        fkField: fieldA,
+        pkTable: tableB,
+        pkField: fieldB
+      };
+    }
+
+    return {
+      fkTable: tableA,
+      fkField: fieldA,
+      pkTable: tableB,
+      pkField: fieldB
+    };
   }
 }
