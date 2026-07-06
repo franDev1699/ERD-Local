@@ -17,8 +17,36 @@ export class CanvasManager {
     this.canvas.style.setProperty('--zoom-level', this.zoom);
     
     if (this.zoomText) {
-      this.zoomText.textContent = `${Math.round(this.zoom * 100)}%`;
+      const zoomString = `${Math.round(this.zoom * 100)}%`;
+      if (this.zoomText.tagName === 'INPUT') {
+        this.zoomText.value = zoomString;
+      } else {
+        this.zoomText.textContent = zoomString;
+      }
     }
+  }
+
+  /**
+   * Zoom while keeping the viewport center point stable on the canvas.
+   * Used by toolbar zoom buttons and manual zoom input.
+   */
+  zoomToCenter(newZoom) {
+    const oldZoom = this.zoom;
+    newZoom = Math.max(this.ZOOM_MIN, Math.min(this.ZOOM_MAX, newZoom));
+    if (newZoom === oldZoom) return;
+
+    const viewportW = this.container.clientWidth;
+    const viewportH = this.container.clientHeight;
+
+    // Canvas coordinate at the center of the viewport before zoom
+    const centerCanvasX = (this.container.scrollLeft + viewportW / 2) / oldZoom;
+    const centerCanvasY = (this.container.scrollTop + viewportH / 2) / oldZoom;
+
+    this.setZoom(newZoom);
+
+    // Adjust scroll so that same canvas point stays at viewport center
+    this.container.scrollLeft = centerCanvasX * newZoom - viewportW / 2;
+    this.container.scrollTop = centerCanvasY * newZoom - viewportH / 2;
   }
 
   getZoom() {
@@ -26,11 +54,11 @@ export class CanvasManager {
   }
 
   centerCanvas() {
-    const canvasWidth = this.canvas.clientWidth;
-    const canvasHeight = this.canvas.clientHeight;
+    const canvasWidth = this.canvas.clientWidth * this.zoom;
+    const canvasHeight = this.canvas.clientHeight * this.zoom;
     
-    this.container.scrollLeft = (this.canvas.clientWidth - this.container.clientWidth) / 2;
-    this.container.scrollTop = (this.canvas.clientHeight - this.container.clientHeight) / 2;
+    this.container.scrollLeft = (canvasWidth - this.container.clientWidth) / 2;
+    this.container.scrollTop = (canvasHeight - this.container.clientHeight) / 2;
   }
 
   fitToContent(tables) {

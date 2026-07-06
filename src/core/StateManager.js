@@ -106,6 +106,14 @@ export class StateManager {
     }
   }
 
+  updateRelationship(relationshipId, updates) {
+    const index = this.state.relationships.findIndex(r => r.id === relationshipId);
+    if (index !== -1) {
+      this.state.relationships[index] = { ...this.state.relationships[index], ...updates };
+      this.notify();
+    }
+  }
+
   moveField(sourceTableId, fieldId, targetTableId, targetIndex) {
     const sourceTable = this.state.tables.find(t => t.id === sourceTableId);
     const targetTable = this.state.tables.find(t => t.id === targetTableId);

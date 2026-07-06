@@ -629,16 +629,27 @@ input[type="text"]:focus, select:focus {
   transform-origin: 0 0;
 }
 
+.connection-path-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 20;
+  pointer-events: stroke;
+  cursor: grab;
+}
+
+.connection-path-hit:active {
+  cursor: grabbing;
+}
+
 .connection-path {
   fill: none;
   stroke: var(--color-primary-light);
   stroke-width: 2.2;
   transition: stroke 0.15s, stroke-width 0.15s;
-  pointer-events: visibleStroke;
-  cursor: pointer;
+  pointer-events: none;
 }
 
-.connection-path:hover {
+.connection-path-hit:hover ~ .connection-path {
   stroke: var(--color-danger-light);
   stroke-width: 3.5;
 }
@@ -648,6 +659,7 @@ input[type="text"]:focus, select:focus {
   stroke: var(--color-primary);
   stroke-width: 6;
   opacity: 0.15;
+  pointer-events: none;
 }
 
 .connection-temp-path {
@@ -1081,9 +1093,27 @@ select option {
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--color-text-main);
-  min-width: 52px;
+  width: 52px;
+  max-width: 70px;
   text-align: center;
-  user-select: none;
+  background: transparent;
+  border: 1px solid transparent;
+  outline: none;
+  border-radius: 4px;
+  padding: 2px 0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.zoom-text:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.zoom-text:focus {
+  background-color: var(--color-bg-sidebar);
+  border-color: var(--color-primary);
+  cursor: text;
 }
 
 /* Floating Search Box */

@@ -19,6 +19,7 @@ export class InteractionController {
     this.onSelectionArea = config.onSelectionArea;
     this.getSelectedTableIds = config.getSelectedTableIds;
     this.getSelectedGroupId = config.getSelectedGroupId;
+    this.onZoomChange = config.onZoomChange;
 
     this.isSpacePressed = false;
     this.selectionStartCanvas = null;
@@ -43,6 +44,12 @@ export class InteractionController {
     this.resizingGroupStartState = null;
 
     this.activeConnectionSource = null;
+
+    // Relationship dragging state
+    this.draggedRelationshipId = null;
+    this.draggedRelationshipStartCoords = null;
+    this.draggedRelationshipStartState = null;
+    this.isDraggingRelationship = false;
     
     // Panning State
     this.isPanning = false;
@@ -62,8 +69,82 @@ export class InteractionController {
   }
 
   _setupMouseEvents() {
+    // Zoom with Ctrl + Scroll Wheel
+    this.dom.canvasContainer.addEventListener("wheel", (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+
+        const rect = this.dom.canvasContainer.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const currentZoom = this.canvasManager.getZoom();
+
+        // Find canvas coordinates under the mouse
+        const canvasX = (mouseX + this.dom.canvasContainer.scrollLeft) / currentZoom;
+        const canvasY = (mouseY + this.dom.canvasContainer.scrollTop) / currentZoom;
+
+        // Calculate new zoom level
+        const zoomStep = 0.05;
+        const newZoom = e.deltaY < 0
+          ? Math.min(this.canvasManager.ZOOM_MAX, currentZoom + zoomStep)
+          : Math.max(this.canvasManager.ZOOM_MIN, currentZoom - zoomStep);
+
+        if (newZoom !== currentZoom) {
+          this.canvasManager.setZoom(newZoom);
+
+          // Adjust scroll to keep mouse cursor in the same position
+          this.dom.canvasContainer.scrollLeft = canvasX * newZoom - mouseX;
+          this.dom.canvasContainer.scrollTop = canvasY * newZoom - mouseY;
+
+          if (this.onZoomChange) {
+            this.onZoomChange();
+          }
+        }
+      }
+    }, { passive: false });
+
     // Canvas Click & Drag (MouseDown)
     this.dom.canvasContainer.addEventListener("mousedown", (e) => {
+      const pathEl = e.target.closest(".connection-path-hit");
+      if (pathEl) {
+        e.stopPropagation();
+        e.preventDefault();
+
+        const relId = pathEl.dataset.id;
+        if (relId) {
+          const state = this.stateManager.getState();
+          const rel = state.relationships.find(r => r.id === relId);
+          if (rel) {
+            const pathD = pathEl.getAttribute("d");
+            if (pathD) {
+              const parts = pathD.trim().split(/\s+/);
+              const x1 = parseFloat(parts[1]);
+              const y1 = parseFloat(parts[2]);
+              const x2 = parseFloat(parts[parts.length - 2]);
+              const y2 = parseFloat(parts[parts.length - 1]);
+
+              this.draggedRelationshipId = relId;
+              this.isDraggingRelationship = false;
+              this.draggedRelationshipStartState = JSON.parse(JSON.stringify(state));
+
+              const rect = this.dom.erdCanvas.getBoundingClientRect();
+              const zoom = this.canvasManager.getZoom();
+              const mouseX = (e.clientX - rect.left) / zoom;
+
+              this.draggedRelationshipStartCoords = {
+                mouseX: mouseX,
+                startX: rel.customChannelX !== undefined && rel.customChannelX !== null ? rel.customChannelX : mouseX,
+                x1, y1, x2, y2
+              };
+
+              document.body.style.userSelect = "none";
+            }
+          }
+        }
+        return;
+      }
+
       const isBg = e.target === this.dom.canvasContainer || e.target === this.dom.erdCanvas || e.target === this.dom.connectionsSvg;
       if (isBg) {
         const shouldPan = this.isSpacePressed || e.button === 1 || e.button === 2;
@@ -98,6 +179,19 @@ export class InteractionController {
           box.style.width = "0px";
           box.style.height = "0px";
           box.style.display = "block";
+        }
+      }
+    });
+
+    this.dom.canvasContainer.addEventListener("dblclick", (e) => {
+      const pathEl = e.target.closest(".connection-path-hit");
+      if (pathEl) {
+        e.stopPropagation();
+        const relId = pathEl.dataset.id;
+        if (relId) {
+          const prevState = JSON.parse(JSON.stringify(this.stateManager.getState()));
+          this.onHistoryPush(prevState);
+          this.stateManager.updateRelationship(relId, { customChannelX: null });
         }
       }
     });
@@ -293,6 +387,29 @@ export class InteractionController {
         this._handleGroupResize(e);
       }
 
+      // 5.5 Relationship Dragging
+      if (this.draggedRelationshipId) {
+        const rect = this.dom.erdCanvas.getBoundingClientRect();
+        const zoom = this.canvasManager.getZoom();
+        const mouseX = (e.clientX - rect.left) / zoom;
+
+        const dx = mouseX - this.draggedRelationshipStartCoords.mouseX;
+        const newChannelX = this.draggedRelationshipStartCoords.startX + dx;
+
+        if (Math.abs(dx) > 3) {
+          this.isDraggingRelationship = true;
+        }
+
+        if (this.isDraggingRelationship) {
+          const { x1, y1, x2, y2 } = this.draggedRelationshipStartCoords;
+          const r = 8;
+          const d = this.renderer._buildOrthogonalPath(x1, y1, x2, y2, newChannelX, r);
+
+          const paths = this.dom.connectionsSvg.querySelectorAll(`[data-id="${this.draggedRelationshipId}"]`);
+          paths.forEach(p => p.setAttribute("d", d));
+        }
+      }
+
       // 6. Collaborative cursor move
       if (this.onCursorMove) {
         const now = Date.now();
@@ -439,6 +556,32 @@ export class InteractionController {
         this.resizingGroupStartState = null;
         document.body.style.userSelect = "auto";
       }
+
+      // End relationship drag
+      if (this.draggedRelationshipId) {
+        if (this.isDraggingRelationship) {
+          const rect = this.dom.erdCanvas.getBoundingClientRect();
+          const zoom = this.canvasManager.getZoom();
+          const mouseX = (e.clientX - rect.left) / zoom;
+
+          const dx = mouseX - this.draggedRelationshipStartCoords.mouseX;
+          const newChannelX = this.draggedRelationshipStartCoords.startX + dx;
+
+          const paths = this.dom.connectionsSvg.querySelectorAll(`[data-id="${this.draggedRelationshipId}"]`);
+          paths.forEach(p => {
+            p.dataset.dragged = "true";
+          });
+
+          this.onHistoryPush(this.draggedRelationshipStartState);
+          this.stateManager.updateRelationship(this.draggedRelationshipId, { customChannelX: newChannelX });
+        }
+
+        this.draggedRelationshipId = null;
+        this.draggedRelationshipStartCoords = null;
+        this.draggedRelationshipStartState = null;
+        this.isDraggingRelationship = false;
+        document.body.style.userSelect = "auto";
+      }
     });
   }
 
@@ -526,14 +669,24 @@ export class InteractionController {
 
     const startX = this.activeConnectionSource.x;
     const startY = this.activeConnectionSource.y;
-    const dx = Math.abs(mouseX - startX);
-    const controlOffset = Math.max(40, dx / 2);
-
     const isLeft = this.activeConnectionSource.portType === "left";
-    const cx1 = isLeft ? startX - controlOffset : startX + controlOffset;
-    const cx2 = mouseX < startX ? mouseX + controlOffset : mouseX - controlOffset;
+    const dir = isLeft ? -1 : 1;
+    const stub = 30;
+    const r = 8;
 
-    tempPath.setAttribute("d", `M ${startX} ${startY} C ${cx1} ${startY}, ${cx2} ${mouseY}, ${mouseX} ${mouseY}`);
+    const stubX = startX + dir * stub;
+    const dy = mouseY - startY;
+
+    let d;
+    if (Math.abs(dy) < 2) {
+      d = `M ${startX} ${startY} L ${mouseX} ${mouseY}`;
+    } else {
+      const dirY = dy > 0 ? 1 : -1;
+      const cr = Math.min(r, Math.abs(dy) / 2, stub);
+      d = `M ${startX} ${startY} L ${stubX - dir * cr} ${startY} Q ${stubX} ${startY} ${stubX} ${startY + dirY * cr} L ${stubX} ${mouseY - dirY * cr} Q ${stubX} ${mouseY} ${stubX + (mouseX > stubX ? 1 : -1) * cr} ${mouseY} L ${mouseX} ${mouseY}`;
+    }
+
+    tempPath.setAttribute("d", d);
   }
 
   _getPortCenter(portEl) {
