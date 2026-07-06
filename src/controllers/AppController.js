@@ -111,6 +111,7 @@ export class AppController {
       projectId: this.projectId,
       webSocket: this.webSocket,
       stateManager: this.stateManager,
+      history: this.history,
       uiManager: this.uiManager,
       canvasManager: this.canvasManager,
       pendingProjectName: this.pendingProjectName,

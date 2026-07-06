@@ -96,9 +96,28 @@ export class DiffEngine {
 
         // Build the final array based on the new ID order
         const result = [];
-        patch.order.forEach(id => {
-          const item = itemMap.get(id);
-          if (item) {
+        const usedIds = new Set();
+        if (patch.order) {
+          patch.order.forEach(id => {
+            const item = itemMap.get(id);
+            if (item) {
+              result.push(JSON.parse(JSON.stringify(item)));
+              usedIds.add(id);
+            }
+          });
+        }
+
+        // Keep any items from the original array that were not used/reordered and not deleted
+        const deletedIds = new Set();
+        if (patch.deleted) {
+          patch.deleted.forEach(id => deletedIds.add(id));
+        }
+        if (patch.delete) {
+          patch.delete.forEach(id => deletedIds.add(id));
+        }
+
+        obj.forEach(item => {
+          if (item && item.id && !usedIds.has(item.id) && !deletedIds.has(item.id)) {
             result.push(JSON.parse(JSON.stringify(item)));
           }
         });
@@ -175,7 +194,8 @@ export class DiffEngine {
         const reversed = {
           type: 'array_diff',
           isIdArray: true,
-          order: patch.oldOrder
+          order: patch.oldOrder,
+          oldOrder: patch.order
         };
 
         if (patch.added && Object.keys(patch.added).length > 0) {

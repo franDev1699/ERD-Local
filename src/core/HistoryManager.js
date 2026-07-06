@@ -9,6 +9,11 @@ export class HistoryManager {
     this.lastState = null;
   }
 
+  resyncBaseline(state) {
+    this.lastState = JSON.parse(JSON.stringify(state));
+  }
+
+
   push(stateOrPrev, newState) {
     let prevState, nextState;
     if (newState === undefined) {

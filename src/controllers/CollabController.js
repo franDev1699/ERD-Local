@@ -1,10 +1,11 @@
 // src/controllers/CollabController.js
 
 export class CollabController {
-  constructor({ projectId, webSocket, stateManager, uiManager, canvasManager, pendingProjectName, onIncomingStateReset }) {
+  constructor({ projectId, webSocket, stateManager, history, uiManager, canvasManager, pendingProjectName, onIncomingStateReset }) {
     this.projectId = projectId;
     this.webSocket = webSocket;
     this.stateManager = stateManager;
+    this.history = history;
     this.uiManager = uiManager;
     this.canvasManager = canvasManager;
     this.pendingProjectName = pendingProjectName;
@@ -104,6 +105,9 @@ export class CollabController {
             this.stateManager.setState(state, false);
           } else {
             this.stateManager.setState(state, true);
+            if (this.history) {
+              this.history.resyncBaseline(state);
+            }
           }
 
           // After initial state load, fit viewport to content so all tables are visible
@@ -134,6 +138,9 @@ export class CollabController {
     } else if (data.type === 'sync_state') {
       if (data.payload) {
         this.stateManager.setState(data.payload, true);
+        if (this.history) {
+          this.history.resyncBaseline(data.payload);
+        }
       }
     } else if (data.type === 'user_list') {
       this.updateActiveUsersList(data.payload);
