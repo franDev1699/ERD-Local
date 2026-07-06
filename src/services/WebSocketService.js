@@ -57,8 +57,8 @@ export class WebSocketService {
         // Flush offline messages buffer
         this._flushQueue();
 
-        // Start heartbeat
-        this._startHeartbeat();
+        // Start heartbeat (Disabled to let native server-side heartbeat manage the connection)
+        // this._startHeartbeat();
 
         if (resolve) resolve();
       };
