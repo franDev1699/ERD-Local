@@ -5,6 +5,14 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
+// SQLite connection & Repositories
+const db = require('./src/db/connection');
+const UserRepository = require('./src/db/UserRepository');
+const SessionRepository = require('./src/db/SessionRepository');
+const ProjectRepository = require('./src/db/ProjectRepository');
+const AiPromptRepository = require('./src/db/AiPromptRepository');
+const { hashPassword, verifyPassword } = require('./src/db/auth');
+
 const PORT = process.env.PORT || 3000;
 const STATE_FILE = path.join(__dirname, 'shared_state.json');
 const PROJECTS_DIR = path.join(__dirname, 'projects');
@@ -33,239 +41,11 @@ if (!fs.existsSync(defaultPath) && fs.existsSync(STATE_FILE)) {
   }
 }
 
-const PROMPTS_FILE = path.join(__dirname, 'ai_prompts.json');
-
-const DEFAULT_PROMPTS = {
-  expectedSchemaText: `Esquema JSON esperado:
-{
-  "tables": [
-    {
-      "id": "string único (ej: tbl-users, tbl-orders)",
-      "name": "string (nombre de tabla sin espacios, snake_case, ej: usuarios, ordenes_compra)",
-      "x": 100, // número
-      "y": 100, // número
-      "fields": [
-        {
-          "id": "string único (ej: f-users-1, f-users-2)",
-          "name": "string (nombre de campo, snake_case, ej: id, email, created_at)",
-          "type": "string (ej: INT, VARCHAR(255), TEXT, DECIMAL(10,2), DATETIME, BOOLEAN)",
-          "isPK": boolean (si es clave primaria),
-          "isAutoIncrement": boolean (opcional, true si es PK autoincrementable),
-          "isNotNull": boolean (si es NOT NULL),
-          "isUnique": boolean (opcional, si es único),
-          "defaultValue": "string (opcional, valor por defecto)"
-        }
-      ],
-      "color": "string (código hexadecimal de color, ej: #6366f1, #10b981, #ef4444, #f59e0b, #ec4899, #06b6d4)",
-      "groupId": "string o null (id del grupo al que pertenece la tabla, o null si ninguno)"
-    }
-  ],
-  "relationships": [
-    {
-      "id": "string único (ej: rel-1)",
-      "fromTable": "string (id de la tabla de origen/padre)",
-      "fromField": "string (id del campo de origen en la tabla de origen)",
-      "toTable": "string (id de la tabla de destino/hijo)",
-      "toField": "string (id del campo de destino en la tabla de destino)"
-    }
-  ],
-  "groups": [
-    {
-      "id": "string único (ej: group-1)",
-      "name": "string (nombre del grupo)",
-      "color": "string (código hexadecimal de color, ej: #374151)",
-      "x": 100, // número
-      "y": 100, // número
-      "width": 300, // número
-      "height": 200 // número
-    }
-  ]
-}
-
-IMPORTANTE - IDIOMA DE NOMENCLATURA:
-Todos los nombres de tablas, campos y grupos DEBEN estar en INGLÉS (snake_case). Ejemplos: users, orders, created_at, product_name, order_items. Nunca uses nombres en español como 'usuarios', 'pedidos', 'nombre_producto'.`,
-
-  layoutRulesText: `REGLAS DE DISEÑO DE COORDENADAS Y AGRUPACIONES (CRÍTICO):
-1. NO permitas la superposición de ningún elemento. Las tablas y los grupos deben estar claramente separados y no superponerse.
-2. ESPACIADO GENERAL:
-   - Mantén al menos 100px de separación entre cualquier tabla suelta (sin grupo) y otros elementos (otras tablas o grupos).
-   - Mantén al menos 150px de separación entre grupos distintos.
-3. TABLAS DENTRO DE GRUPOS (groupId definido):
-   - Una tabla perteneciente a un grupo DEBE ubicarse físicamente dentro de los límites de ese grupo.
-   - PADDING SUPERIOR (Grupo): El título del grupo se renderiza en la parte superior. Las tablas dentro del grupo DEBEN tener su coordenada 'y' al menos a 60px del borde superior del grupo (ej: y_tabla >= group.y + 60). Nunca coloques una tabla cubriendo el título del grupo.
-   - PADDING LATERAL E INFERIOR (Grupo): Las tablas deben estar separadas de los bordes izquierdo y derecho por al menos 30px, y del borde inferior del grupo por al menos 50px (ej: y_tabla + alto_tabla <= group.y + group.height - 50). Esto evita estrictamente que peguen al borde inferior del grupo.
-   - ESPACIADO INTERNO: Las tablas dentro del mismo grupo deben distribuirse ordenadamente (p. ej. en columnas o cuadrícula). Deja al menos 80px de distancia horizontal y 60px de distancia vertical entre las tablas del mismo grupo.
-   - TAMAÑO DEL GRUPO: Ajusta 'width' y 'height' del grupo de manera proporcional para que todas sus tablas quepan holgadamente dentro, respetando los paddings y márgenes descritos (ej. para dos tablas medianas de alto 200px en vertical, el grupo necesita al menos width: 310px y height: 510px).`,
-
-  mode_create: `Eres un diseñador de bases de datos experto. Genera un esquema de base de datos ERD desde cero que responda a la solicitud del usuario en el siguiente formato JSON estricto. No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
-
-{expectedSchemaText}
-
-Reglas importantes:
-1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
-2. Cada tabla debe tener una clave primaria (isPK: true).
-3. Todas las relaciones referenciadas en 'relationships' deben usar IDs de tablas y campos existentes en el JSON.
-4. Asigna coordenadas x e y, así como dimensiones de grupos y tablas de forma distribuida de acuerdo con estas directrices:
-{layoutRulesText}`,
-
-  mode_append: `Eres un diseñador de bases de datos experto. El usuario desea AGREGAR nuevos elementos (tablas, relaciones, grupos) al diagrama actual. 
-NO debes modificar, renombrar, alterar ni eliminar ninguna de las tablas, campos, relaciones ni grupos existentes en el 'Estado actual del diagrama' suministrado.
-Genera únicamente los NUEVOS elementos que se deben agregar para cumplir la solicitud.
-
-Tu respuesta en formato JSON estricto debe incluir:
-1. En "tables": Únicamente las NUEVAS tablas que se van a agregar. NO incluyas ninguna de las tablas existentes del 'Estado actual del diagrama'.
-2. En "relationships": Únicamente las NUEVAS relaciones creadas. Puedes relacionar las tablas nuevas entre sí, o relacionar las tablas nuevas con las existentes usando los IDs de las tablas existentes. NO incluyas relaciones que ya existen.
-3. En "groups": Únicamente los NUEVOS grupos creados (si aplica).
-No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
-
-{expectedSchemaText}
-
-Reglas importantes:
-1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
-2. Cada tabla nueva debe tener una clave primaria (isPK: true).
-3. Las nuevas relaciones en 'relationships' deben usar IDs de tablas y campos existentes en el estado actual o en las nuevas tablas.
-4. Asigna coordenadas x e y a las nuevas tablas y grupos de acuerdo con las siguientes directrices:
-{layoutRulesText}
-5. Queda estrictamente PROHIBIDO incluir tablas o relaciones existentes en el JSON de respuesta. Solo devuelve lo NUEVO.
-
-Estado actual del diagrama (para referencia de contexto, nombres e IDs existentes):
-{currentState}`,
-
-  mode_edit: `Eres un diseñador de bases de datos experto. El usuario desea MODIFICAR o EDITAR el diagrama actual.
-Analiza el 'Estado actual del diagrama' suministrado y aplica únicamente los cambios solicitados por el usuario (por ejemplo: agregar o modificar campos, renombrar una tabla, agregar una relación, eliminar una tabla, etc.).
-NO alteres, reescribas ni elimines tablas, campos, tipos o relaciones a menos que el usuario lo pida explícitamente. Mantén la estructura existente intacta tanto como sea posible.
-
-Debes devolver el estado COMPLETO del diagrama en tu respuesta JSON, incluyendo todas las tablas y relaciones (tanto las modificadas como las no modificadas). Conserva estrictamente los IDs existentes (de tablas, campos, relaciones y grupos) que no hayan sido eliminados para no romper el lienzo.
-No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
-
-{expectedSchemaText}
-
-Reglas importantes:
-1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
-2. Cada tabla debe tener una clave primaria (isPK: true).
-3. Conserva los IDs originales de las tablas, campos y relaciones que no cambien.
-4. Si agregas o reposicionas tablas o grupos, sigue estrictamente estas directrices:
-{layoutRulesText}
-4. Si el usuario pide eliminar algún elemento, puedes omitirlo del JSON de salida.
-
-Estado actual del diagrama (si deseas extenderlo o relacionarlo, úsalo como base):
-{currentState}`,
-
-  mode_layout: `Eres un diseñador de bases de datos experto. El usuario desea REORGANIZAR las posiciones y dimensiones de las tablas y grupos del diagrama para mejorar su legibilidad y estética.
-NO agregues, modifiques ni elimines ninguna tabla, campo, tipo ni relación. Solo debes ajustar las coordenadas (x, y) de las tablas y de los grupos, y las dimensiones (width, height) de los grupos.
-Agrupa físicamente cerca las tablas relacionadas, manteniendo un excelente espacio libre entre ellas.
-
-Debes devolver el estado COMPLETO del diagrama en tu respuesta JSON, incluyendo exactamente las mismas tablas, relaciones y grupos (con sus nombres e IDs idénticos), pero con coordenadas optimizadas.
-No devuelvas ningún otro texto, explicaciones, markdown, ni HTML, solo el objeto JSON crudo.
-
-{expectedSchemaText}
-
-Reglas importantes:
-1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
-2. No cambies nombres de tablas, campos ni relaciones. Tampoco añadas ni elimines campos.
-3. Organiza todas las coordenadas y dimensiones del diagrama siguiendo al pie de la letra estas directrices:
-{layoutRulesText}
-
-Estado actual del diagrama:
-{currentState}`,
-
-  mode_query_generate: `Eres un administrador de bases de datos y desarrollador SQL experto.
-Tu tarea es generar o modificar una consulta SQL basada en la descripción del usuario y el esquema de base de datos suministrado.
-El motor de base de datos destino es: {engine}.
-Asegúrate de que la consulta SQL use la sintaxis correcta del motor destino, califique los nombres de los campos de manera clara y use JOINs adecuados si hay relaciones entre las tablas.
-
-Debes devolver la respuesta estrictamente en el siguiente formato JSON:
-{
-  "name": "Nombre corto descriptivo de la consulta",
-  "sql": "Código SQL formateado y listo para ejecutar",
-  "explanation": "Breve explicación de una línea sobre cómo funciona la consulta"
-}
-
-No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON.
-
-Esquema actual de base de datos:
-{currentState}
-{currentQuerySql}`,
-
-  mode_query_suggest: `Eres un administrador de bases de datos y desarrollador SQL experto.
-Analiza el esquema de base de datos suministrado y sugiere 3 consultas SQL de negocio o analíticas útiles (ej. reportes, acumulados, cruces de información).
-Para cada sugerencia, proporciona un nombre y un prompt descriptivo en español que el usuario pueda usar para generar la consulta.
-
-Debes devolver la respuesta estrictamente en el siguiente formato JSON de arreglo:
-[
-  {
-    "name": "ej: Usuarios con más compras",
-    "prompt": "ej: Muestra los top 5 usuarios con mayor volumen de compras y sus datos de perfil"
-  },
-  ...
-]
-
-No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON.
-
-Esquema de base de datos:
-{currentState}`,
-
-  mode_query_explain: `Eres un administrador de bases de datos y profesor SQL experto.
-Tu tarea es explicar de manera clara y detallada cómo funciona la consulta SQL proporcionada por el usuario.
-El motor de base de datos es: {engine}.
-
-Debes explicar:
-1. Qué hace la consulta paso a paso (SELECT, FROM, JOINs, WHERE, GROUP BY, ORDER BY, etc.)
-2. Qué tablas y campos involucra y por qué
-3. Si usa JOINs, explica el tipo de JOIN y cómo conecta las tablas
-4. Si tiene funciones de agregación, subconsultas o CTEs, explícalas
-5. Posibles optimizaciones o mejoras si las detectas
-
-Devuelve la respuesta estrictamente en el siguiente formato JSON:
-{
-  "explanation": "Explicación detallada y bien formateada de la consulta"
-}
-
-No agregues bloques de código \`\`\`json ni texto explicativo fuera del JSON. Responde en español.
-
-Esquema actual de base de datos:
-{currentState}`,
-
-  prompt_document: `Genera una documentación en Markdown (.md) elegante, detallada y profesional para el siguiente esquema de base de datos JSON.
-
-Esquema JSON de la Base de Datos:
-{currentState}
-
-La documentación debe incluir:
-1. Un título principal llamativo.
-2. Una introducción que describa conceptualmente el propósito general del sistema basándote en las tablas encontradas.
-3. Un índice de contenidos.
-4. Por cada tabla:
-   - Su nombre y una breve descripción de su función.
-   - Una tabla Markdown con sus campos, detallando: Nombre de columna, Tipo de dato, Llaves (PK/FK), si permite Nulos (NULL/NOT NULL), Valor por defecto (si lo tiene) y una descripción detallada que supongas para qué sirve ese campo.
-5. Una sección de Relaciones y Reglas de Negocio, describiendo qué tabla se relaciona con cuál y la cardinalidad.
-6. Un bloque de diagrama Mermaid que ilustre visualmente las relaciones entre tablas (usando la sintaxis erDiagram de Mermaid).
-
-Asegúrate de que la salida sea estrictamente Markdown limpio para poder ser guardado como un archivo .md. No agregues explicaciones fuera del bloque Markdown.`
-};
-
-let aiPrompts = { ...DEFAULT_PROMPTS };
-
-function loadAiPrompts() {
-  if (fs.existsSync(PROMPTS_FILE)) {
-    try {
-      const data = fs.readFileSync(PROMPTS_FILE, 'utf8');
-      aiPrompts = { ...DEFAULT_PROMPTS, ...JSON.parse(data) };
-    } catch (e) {
-      console.error('Error al cargar ai_prompts.json:', e.message);
-      aiPrompts = { ...DEFAULT_PROMPTS };
-    }
-  } else {
-    try {
-      fs.writeFileSync(PROMPTS_FILE, JSON.stringify(DEFAULT_PROMPTS, null, 2), 'utf8');
-      console.log('Creado archivo de prompts por defecto: ai_prompts.json');
-    } catch (e) {
-      console.error('Error al crear ai_prompts.json:', e.message);
-    }
-  }
-}
-
-loadAiPrompts();
+const VALID_PROMPT_KEYS = [
+  'expectedSchemaText', 'layoutRulesText', 'mode_create', 'mode_append', 
+  'mode_edit', 'mode_layout', 'mode_query_generate', 'mode_query_suggest', 
+  'mode_query_explain', 'prompt_document'
+];
 
 
 // MIME types mapping
@@ -535,23 +315,24 @@ class ContextBuilder {
 }
 
 // Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa
-function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds }) {
+function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds, userId }) {
   return new Promise((resolve, reject) => {
     let promptTemplate = '';
+    const prompts = AiPromptRepository.getPromptsForUser(userId);
     if (mode === 'append') {
-      promptTemplate = aiPrompts.mode_append;
+      promptTemplate = prompts.mode_append;
     } else if (mode === 'edit') {
-      promptTemplate = aiPrompts.mode_edit;
+      promptTemplate = prompts.mode_edit;
     } else if (mode === 'layout') {
-      promptTemplate = aiPrompts.mode_layout;
+      promptTemplate = prompts.mode_layout;
     } else if (mode === 'query_generate') {
-      promptTemplate = aiPrompts.mode_query_generate;
+      promptTemplate = prompts.mode_query_generate;
     } else if (mode === 'query_suggest') {
-      promptTemplate = aiPrompts.mode_query_suggest;
+      promptTemplate = prompts.mode_query_suggest;
     } else if (mode === 'query_explain') {
-      promptTemplate = aiPrompts.mode_query_explain;
+      promptTemplate = prompts.mode_query_explain;
     } else {
-      promptTemplate = aiPrompts.mode_create;
+      promptTemplate = prompts.mode_create;
     }
 
     const optimizedContext = ContextBuilder.build({
@@ -572,9 +353,9 @@ function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, 
     const stateStr = JSON.stringify(optimizedContext);
     const currentQuerySqlStr = currentQuerySql ? `\nConsulta SQL actual a modificar:\n${currentQuerySql}` : '';
 
-    let systemInstruction = promptTemplate
-      .replace(/{expectedSchemaText}/g, aiPrompts.expectedSchemaText)
-      .replace(/{layoutRulesText}/g, aiPrompts.layoutRulesText)
+    let systemInstruction = (promptTemplate || '')
+      .replace(/{expectedSchemaText}/g, prompts.expectedSchemaText || '')
+      .replace(/{layoutRulesText}/g, prompts.layoutRulesText || '')
       .replace(/{currentState}/g, stateStr)
       .replace(/{engine}/g, engine || 'PostgreSQL')
       .replace(/{currentQuerySql}/g, currentQuerySqlStr);
@@ -757,10 +538,11 @@ function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, 
 }
 
 // Helper para solicitar la documentación detallada en Markdown a la IA
-function makeAiDocRequest({ provider, apiKey, apiUrl, model, currentState }) {
+function makeAiDocRequest({ provider, apiKey, apiUrl, model, currentState, userId }) {
   return new Promise((resolve, reject) => {
+    const prompts = AiPromptRepository.getPromptsForUser(userId);
     const stateStr = JSON.stringify(currentState || { tables: [], relationships: [] }, null, 2);
-    const prompt = aiPrompts.prompt_document.replace(/{currentState}/g, stateStr);
+    const prompt = (prompts.prompt_document || '').replace(/{currentState}/g, stateStr);
 
     let requestBody = '';
     let options = {};
@@ -938,57 +720,532 @@ function cleanJsonResponseText(text) {
   return cleaned.trim();
 }
 
-// HTTP Server to serve static files and API endpoints
-const server = http.createServer((req, res) => {
-  // GET /api/ai/prompts - Obtener los prompts configurados
-  if (req.method === 'GET' && req.url === '/api/ai/prompts') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(aiPrompts));
-    return;
+// Helper to parse cookies
+function parseCookies(req) {
+  const list = {};
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return list;
+  cookieHeader.split(';').forEach(cookie => {
+    const parts = cookie.split('=');
+    const name = parts.shift().trim();
+    const value = parts.join('=').trim();
+    list[name] = decodeURIComponent(value);
+  });
+  return list;
+}
+
+// Helper to resolve session
+function parseSessionToken(req) {
+  const cookies = parseCookies(req);
+  let token = cookies['session_token'];
+
+  if (!token && req.headers.authorization) {
+    const parts = req.headers.authorization.split(' ');
+    if (parts.length === 2 && parts[0] === 'Bearer') {
+      token = parts[1];
+    }
   }
 
-  // POST /api/ai/prompts - Guardar o restablecer prompts
-  if (req.method === 'POST' && req.url === '/api/ai/prompts') {
+  if (!token) {
+    try {
+      const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      token = urlObj.searchParams.get('token') || urlObj.searchParams.get('session_token');
+    } catch (e) {}
+  }
+
+  if (!token) return null;
+  return SessionRepository.getSession(token);
+}
+
+// Helper to enforce auth
+function requireAuth(req, res) {
+  const session = parseSessionToken(req);
+  if (!session) {
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'No autorizado. Inicie sesión.' }));
+    return null;
+  }
+  return session;
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', chunk => {
       body += chunk.toString();
     });
     req.on('end', () => {
       try {
-        const payload = JSON.parse(body);
+        resolve(body ? JSON.parse(body) : {});
+      } catch (err) {
+        reject(err);
+      }
+    });
+  });
+}
+
+// HTTP Server to serve static files and API endpoints
+const server = http.createServer(async (req, res) => {
+  const cleanUrl = req.url.split('?')[0];
+
+  // 1. PUBLIC AUTH ENDPOINTS
+  if (req.method === 'POST' && cleanUrl === '/api/login') {
+    try {
+      const { username, password } = await readJsonBody(req);
+      if (!username || !password) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Usuario y contraseña son requeridos.' }));
+        return;
+      }
+
+      const user = UserRepository.getUserByUsername(username.trim());
+      if (!user) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Usuario o contraseña incorrectos.' }));
+        return;
+      }
+
+      const isValid = await verifyPassword(password, user.password_hash, user.password_salt);
+      if (!isValid) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Usuario o contraseña incorrectos.' }));
+        return;
+      }
+
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
+
+      SessionRepository.createSession({
+        token,
+        user_id: user.id,
+        expires_at: expiresAt.toISOString()
+      });
+
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Set-Cookie': `session_token=${token}; HttpOnly; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax`
+      });
+      res.end(JSON.stringify({ success: true }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && cleanUrl === '/api/register') {
+    try {
+      const { username, displayName, password, color } = await readJsonBody(req);
+      if (!username || !displayName || !password) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Todos los campos son obligatorios.' }));
+        return;
+      }
+
+      const existing = UserRepository.getUserByUsername(username.trim());
+      if (existing) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'El nombre de usuario ya está en uso.' }));
+        return;
+      }
+
+      const { hash, salt } = await hashPassword(password);
+      const userId = 'u_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+      const user = UserRepository.createUser({
+        id: userId,
+        username: username.trim(),
+        password_hash: hash,
+        password_salt: salt,
+        display_name: displayName.trim(),
+        color,
+        is_admin: 0 // Public signups are regular users
+      });
+
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
+
+      SessionRepository.createSession({
+        token,
+        user_id: user.id,
+        expires_at: expiresAt.toISOString()
+      });
+
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Set-Cookie': `session_token=${token}; HttpOnly; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax`
+      });
+      res.end(JSON.stringify({ success: true }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && cleanUrl === '/api/logout') {
+    const cookies = parseCookies(req);
+    const token = cookies['session_token'];
+    if (token) {
+      SessionRepository.deleteSession(token);
+    }
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Set-Cookie': `session_token=; HttpOnly; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`
+    });
+    res.end(JSON.stringify({ success: true }));
+    return;
+  }
+
+  // 2. SECURE API ENDPOINTS (Require active session)
+  const session = parseSessionToken(req);
+
+  if (cleanUrl.startsWith('/api/')) {
+    if (!session) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'No autorizado. Por favor inicie sesión.' }));
+      return;
+    }
+
+    // GET /api/me
+    if (req.method === 'GET' && cleanUrl === '/api/me') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        userId: session.user_id,
+        username: session.username,
+        display_name: session.display_name,
+        color: session.color,
+        is_admin: session.is_admin
+      }));
+      return;
+    }
+
+    // GET /api/projects - List all projects accessible by user
+    if (req.method === 'GET' && cleanUrl === '/api/projects') {
+      try {
+        const dbProjects = ProjectRepository.listProjectsForUser(session.user_id, session.is_admin === 1);
+        const enrichedDbProjects = dbProjects.map(p => {
+          const fileName = `${p.id}.json`;
+          const filePath = path.join(PROJECTS_DIR, fileName);
+          let tableCount = 0;
+          let relationshipCount = 0;
+          let lastModified = p.created_at || new Date();
+          let name = p.name || p.id;
+
+          if (fs.existsSync(filePath)) {
+            try {
+              const stats = fs.statSync(filePath);
+              const state = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+              if (state.name) name = state.name;
+              tableCount = state.tables ? state.tables.length : 0;
+              relationshipCount = state.relationships ? state.relationships.length : 0;
+              lastModified = stats.mtime;
+
+              // Keep SQLite display_name in sync with diagram file name on disk
+              if (state.name && state.name !== p.name) {
+                ProjectRepository.updateProjectName(p.id, state.name);
+              }
+            } catch (e) {
+              // Ignore file read/parse errors
+            }
+          }
+
+          return {
+            ...p,
+            name,
+            tableCount,
+            relationshipCount,
+            lastModified
+          };
+        });
+
+        const dbProjectIds = new Set(dbProjects.map(p => p.id));
+        const files = fs.readdirSync(PROJECTS_DIR);
+        const projectsList = [...enrichedDbProjects];
+
+        files.forEach(file => {
+          if (file.endsWith('.json') && !file.includes('.backup_') && !file.endsWith('.tmp')) {
+            const projectId = file.slice(0, -5);
+            if (!dbProjectIds.has(projectId)) {
+              try {
+                const filePath = path.join(PROJECTS_DIR, file);
+                const stats = fs.statSync(filePath);
+                const state = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+                projectsList.push({
+                  id: projectId,
+                  name: state.name || projectId,
+                  tableCount: state.tables ? state.tables.length : 0,
+                  relationshipCount: state.relationships ? state.relationships.length : 0,
+                  lastModified: stats.mtime,
+                  role: 'public',
+                  owner_name: 'Sistema'
+                });
+              } catch (e) {
+                // Ignore malformed files
+              }
+            }
+          }
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(projectsList));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/delete-project - Delete a project (Owner or Admin only)
+    if (cleanUrl === '/api/delete-project') {
+      try {
+        const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const projectToDelete = urlObj.searchParams.get('project');
+        if (projectToDelete) {
+          const project = ProjectRepository.getProject(projectToDelete);
+          if (project) {
+            const isOwner = project.owner_id === session.user_id;
+            const isAdmin = session.is_admin === 1;
+            if (!isOwner && !isAdmin) {
+              res.writeHead(403, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Permiso denegado. Solo el creador o un administrador pueden eliminar este proyecto.' }));
+              return;
+            }
+            ProjectRepository.deleteProject(projectToDelete);
+          }
+
+          const filePath = getProjectPath(projectToDelete);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            
+            // Clean backups
+            try {
+              const files = fs.readdirSync(PROJECTS_DIR);
+              files.forEach(file => {
+                if (file.startsWith(`${projectToDelete}.backup_`)) {
+                  fs.unlinkSync(path.join(PROJECTS_DIR, file));
+                }
+              });
+            } catch (backupErr) {
+              console.error('Error al limpiar backups:', backupErr.message);
+            }
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+          return;
+        }
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Proyecto no especificado' }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // GET /api/users/list - Return list of public user profiles for autocompletion
+    if (req.method === 'GET' && cleanUrl === '/api/users/list') {
+      try {
+        const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const projectId = urlObj.searchParams.get('project');
+        
+        let existingUserIds = new Set();
+        if (projectId) {
+          try {
+            const members = ProjectRepository.getProjectMembers(projectId);
+            members.forEach(m => existingUserIds.add(m.user_id));
+          } catch (e) {
+            console.error('[server.js] Error getProjectMembers:', e.message);
+          }
+        }
+
+        const currentUserId = session.user_id;
+        const usersList = UserRepository.listAllUsers()
+          .filter(u => u.id !== currentUserId && !existingUserIds.has(u.id))
+          .map(u => ({
+            username: u.username,
+            display_name: u.display_name,
+            color: u.color
+          }));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(usersList));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // GET /api/projects/members - List project members
+    if (req.method === 'GET' && cleanUrl === '/api/projects/members') {
+      try {
+        const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const projectId = urlObj.searchParams.get('project');
+        if (!projectId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Proyecto no especificado' }));
+          return;
+        }
+
+        const role = ProjectRepository.getProjectRole(projectId, session.user_id);
+        const isAdmin = session.is_admin === 1;
+
+        if (!role && !isAdmin) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No tienes acceso a los miembros de este proyecto.' }));
+          return;
+        }
+
+        const members = ProjectRepository.getProjectMembers(projectId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(members));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/projects/members - Add/Edit project member
+    if (req.method === 'POST' && cleanUrl === '/api/projects/members') {
+      try {
+        const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const projectId = urlObj.searchParams.get('project');
+        if (!projectId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Proyecto no especificado' }));
+          return;
+        }
+
+        const role = ProjectRepository.getProjectRole(projectId, session.user_id);
+        const isAdmin = session.is_admin === 1;
+
+        if (role !== 'owner' && !isAdmin) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Permiso denegado. Solo el creador del proyecto o un administrador pueden gestionar colaboradores.' }));
+          return;
+        }
+
+        const { username, role: memberRole } = await readJsonBody(req);
+        if (!username || !memberRole) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Username y role son requeridos.' }));
+          return;
+        }
+
+        const targetUser = UserRepository.getUserByUsername(username.trim());
+        if (!targetUser) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: `El usuario "${username}" no existe.` }));
+          return;
+        }
+
+        ProjectRepository.addProjectMember({
+          projectId,
+          userId: targetUser.id,
+          role: memberRole
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/projects/remove-member - Remove project member
+    if (req.method === 'POST' && cleanUrl === '/api/projects/remove-member') {
+      try {
+        const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const projectId = urlObj.searchParams.get('project');
+        if (!projectId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Proyecto no especificado' }));
+          return;
+        }
+
+        const role = ProjectRepository.getProjectRole(projectId, session.user_id);
+        const isAdmin = session.is_admin === 1;
+
+        if (role !== 'owner' && !isAdmin) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Permiso denegado. Solo el creador del proyecto o un administrador pueden gestionar colaboradores.' }));
+          return;
+        }
+
+        const { userId } = await readJsonBody(req);
+        if (!userId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'userId es requerido.' }));
+          return;
+        }
+
+        if (userId === session.user_id && role === 'owner') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No puedes removerte a ti mismo siendo creador del proyecto.' }));
+          return;
+        }
+
+        ProjectRepository.removeProjectMember({
+          projectId,
+          userId
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // GET /api/ai/prompts or /api/ai-prompts
+    if (req.method === 'GET' && (cleanUrl === '/api/ai/prompts' || cleanUrl === '/api/ai-prompts')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(AiPromptRepository.getPromptsForUser(session.user_id)));
+      return;
+    }
+
+    // POST /api/ai/prompts or /api/ai-prompts
+    if (req.method === 'POST' && (cleanUrl === '/api/ai/prompts' || cleanUrl === '/api/ai-prompts')) {
+      try {
+        const payload = await readJsonBody(req);
         if (payload.reset) {
-          aiPrompts = { ...DEFAULT_PROMPTS };
+          AiPromptRepository.resetUserPrompts(session.user_id);
         } else {
           // Copiar valores recibidos válidos
-          const keys = Object.keys(DEFAULT_PROMPTS);
+          const keys = VALID_PROMPT_KEYS;
           for (const key of keys) {
             if (payload[key] !== undefined) {
-              aiPrompts[key] = payload[key];
+              AiPromptRepository.setPrompt(session.user_id, key, {
+                promptTemplate: payload[key],
+                scope: 'user'
+              });
             }
           }
         }
-        
-        fs.writeFileSync(PROMPTS_FILE, JSON.stringify(aiPrompts, null, 2), 'utf8');
+
+        const prompts = AiPromptRepository.getPromptsForUser(session.user_id);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, prompts: aiPrompts }));
+        res.end(JSON.stringify({ success: true, prompts }));
       } catch (err) {
         console.error('Error al guardar prompts:', err.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
-    });
-    return;
-  }
+      return;
+    }
 
-  // POST /api/ai/generate - Proxy de Inteligencia Artificial
-  if (req.method === 'POST' && req.url === '/api/ai/generate') {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-    });
-    req.on('end', async () => {
+    // POST /api/ai/generate - AI Proxy
+    if (req.method === 'POST' && cleanUrl === '/api/ai/generate') {
       try {
-        const params = JSON.parse(body);
+        const params = await readJsonBody(req);
         if (!params.prompt && params.mode !== 'query_suggest') {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'El campo "prompt" es obligatorio.' }));
@@ -1001,6 +1258,7 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        params.userId = session.user_id; // Inyectar id del usuario
         const aiResult = await makeAiRequest(params);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(aiResult));
@@ -1009,19 +1267,13 @@ const server = http.createServer((req, res) => {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
-    });
-    return;
-  }
+      return;
+    }
 
-  // POST /api/ai/document - Generar Documentación Markdown con IA
-  if (req.method === 'POST' && req.url === '/api/ai/document') {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-    });
-    req.on('end', async () => {
+    // POST /api/ai/document - AI Document Generator
+    if (req.method === 'POST' && cleanUrl === '/api/ai/document') {
       try {
-        const params = JSON.parse(body);
+        const params = await readJsonBody(req);
         const requiresApiKey = ['gemini', 'openai'].includes(params.provider);
         if (requiresApiKey && !params.apiKey) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1029,6 +1281,7 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        params.userId = session.user_id; // Inyectar id del usuario
         const mdDoc = await makeAiDocRequest(params);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ markdown: mdDoc }));
@@ -1037,85 +1290,153 @@ const server = http.createServer((req, res) => {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
+      return;
+    }
+
+    // 3. ADMIN-ONLY ENDPOINTS
+    // GET /api/admin/users
+    if (req.method === 'GET' && cleanUrl === '/api/admin/users') {
+      if (session.is_admin !== 1) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Acceso denegado. Se requieren permisos de administrador.' }));
+        return;
+      }
+      const usersList = UserRepository.listAllUsers();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(usersList));
+      return;
+    }
+
+    // POST /api/admin/create-user
+    if (req.method === 'POST' && cleanUrl === '/api/admin/create-user') {
+      if (session.is_admin !== 1) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Acceso denegado. Se requieren permisos de administrador.' }));
+        return;
+      }
+      try {
+        const { username, displayName, password, color, is_admin } = await readJsonBody(req);
+        if (!username || !displayName || !password) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Faltan campos obligatorios.' }));
+          return;
+        }
+
+        const existing = UserRepository.getUserByUsername(username.trim());
+        if (existing) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'El nombre de usuario ya está en uso.' }));
+          return;
+        }
+
+        const { hash, salt } = await hashPassword(password);
+        const userId = 'u_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+        UserRepository.createUser({
+          id: userId,
+          username: username.trim(),
+          password_hash: hash,
+          password_salt: salt,
+          display_name: displayName.trim(),
+          color,
+          is_admin: is_admin ? 1 : 0
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/admin/update-user
+    if (req.method === 'POST' && cleanUrl === '/api/admin/update-user') {
+      if (session.is_admin !== 1) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Acceso denegado. Se requieren permisos de administrador.' }));
+        return;
+      }
+      try {
+        const { userId, displayName, color, is_admin } = await readJsonBody(req);
+        if (!userId || !displayName) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'userId y displayName son requeridos.' }));
+          return;
+        }
+
+        // Prevent admin from removing their own admin privilege to avoid locking out the system
+        const finalIsAdmin = (userId === session.user_id) ? true : is_admin;
+
+        UserRepository.updateUser(userId, {
+          display_name: displayName.trim(),
+          color,
+          is_admin: finalIsAdmin ? 1 : 0
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/admin/delete-user
+    if (req.method === 'POST' && cleanUrl === '/api/admin/delete-user') {
+      if (session.is_admin !== 1) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Acceso denegado. Se requieren permisos de administrador.' }));
+        return;
+      }
+      try {
+        const { userId } = await readJsonBody(req);
+        if (!userId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'userId es requerido.' }));
+          return;
+        }
+
+        if (userId === session.user_id) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No puedes eliminarte a ti mismo.' }));
+          return;
+        }
+
+        UserRepository.deleteUser(userId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+  }
+
+  // 4. STATIC PAGES & FILE SERVING
+  // If not logged in, intercept pages and serve login page content
+  const isPage = cleanUrl === '/' || cleanUrl === '/index.html';
+  if (isPage && !session) {
+    const loginPath = path.join(__dirname, 'login.html');
+    fs.readFile(loginPath, (err, content) => {
+      if (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Error interno del servidor al cargar el portal de login.');
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(content, 'utf-8');
+      }
     });
     return;
   }
 
-  // GET /api/projects - List all projects
-  if (req.url === '/api/projects') {
-    try {
-      const files = fs.readdirSync(PROJECTS_DIR);
-      const projectsList = [];
-      files.forEach(file => {
-        if (file.endsWith('.json') && !file.includes('.backup_') && !file.endsWith('.tmp')) {
-          const projectId = file.slice(0, -5);
-          try {
-            const filePath = path.join(PROJECTS_DIR, file);
-            const stats = fs.statSync(filePath);
-            const state = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-            projectsList.push({
-              id: projectId,
-              name: state.name || projectId,
-              tableCount: state.tables ? state.tables.length : 0,
-              relationshipCount: state.relationships ? state.relationships.length : 0,
-              lastModified: stats.mtime
-            });
-          } catch (e) {
-            // Ignore malformed JSON files
-          }
-        }
-      });
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(projectsList));
-    } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return;
-  }
-
-  // POST /api/delete-project - Delete a project
-  if (req.url.startsWith('/api/delete-project')) {
-    try {
-      const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-      const projectToDelete = urlObj.searchParams.get('project');
-      if (projectToDelete) {
-        const filePath = getProjectPath(projectToDelete);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          
-          // Also clean up any backups for this project
-          try {
-            const files = fs.readdirSync(PROJECTS_DIR);
-            files.forEach(file => {
-              if (file.startsWith(`${projectToDelete}.backup_`)) {
-                fs.unlinkSync(path.join(PROJECTS_DIR, file));
-              }
-            });
-          } catch (backupErr) {
-            console.error('Error al limpiar backups:', backupErr.message);
-          }
-
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: true }));
-          return;
-        }
-      }
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Proyecto no encontrado' }));
-    } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return;
-  }
-
   // Normalize path and prevent directory traversal
-  const cleanUrl = req.url.split('?')[0];
   let filePath = cleanUrl === '/' ? '/index.html' : cleanUrl;
   filePath = path.join(__dirname, filePath);
 
-  // Ensure filePath is within __dirname
   if (!filePath.startsWith(__dirname)) {
     res.statusCode = 403;
     res.end('Acceso denegado');
@@ -1192,6 +1513,42 @@ server.on('upgrade', (req, socket) => {
   const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const projectId = urlObj.searchParams.get('project') || 'default';
 
+  // Session validation on Upgrade
+  const session = parseSessionToken(req);
+  if (!session) {
+    console.log('[WebSocket] Conexión rechazada: No autorizado.');
+    socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  const userId = session.user_id;
+  let role = ProjectRepository.getProjectRole(projectId, userId);
+
+  if (!role) {
+    const exists = ProjectRepository.isProjectRegistered(projectId);
+    if (!exists) {
+      console.log(`[WebSocket] Migrando/Creando proyecto ${projectId} en BD. Owner: ${session.username}`);
+      const pendingName = urlObj.searchParams.get('name');
+      let displayName = pendingName || projectId;
+      const diskState = loadProjectState(projectId);
+      if (diskState && diskState.name) {
+        displayName = diskState.name;
+      }
+      ProjectRepository.createProject({
+        id: projectId,
+        display_name: displayName,
+        owner_id: userId
+      });
+      role = 'owner';
+    } else {
+      console.log(`[WebSocket] Acceso denegado a ${session.username} para el proyecto ${projectId} (No es miembro).`);
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+  }
+
   // Sec-WebSocket-Key handshake
   const key = req.headers['sec-websocket-key'];
   const hash = crypto.createHash('sha1')
@@ -1216,12 +1573,17 @@ server.on('upgrade', (req, socket) => {
     socket, 
     state: 1, // 1 = OPEN
     projectId,
-    user: { userId: '', username: '', color: '' },
+    user: { 
+      userId: session.user_id, 
+      username: session.display_name, // Usar display_name como nombre visible
+      color: session.color || '#6366f1',
+      role: role
+    },
     isAlive: true
   };
   room.add(client);
 
-  console.log(`Nuevo compañero conectado al proyecto: "${projectId}"`);
+  console.log(`Nuevo compañero conectado al proyecto: "${projectId}" (Rol: ${role})`);
 
   let projectState = loadProjectState(projectId);
   if (!projectState) {
@@ -1280,17 +1642,11 @@ server.on('upgrade', (req, socket) => {
             const data = JSON.parse(completeMessage);
             
             if (data.type === 'ping') {
-              // Respond to application-level ping
               sendFrame(socket, { type: 'pong' });
             } else if (data.type === 'join') {
-              client.user = {
-                userId: data.payload.userId,
-                username: data.payload.username,
-                color: data.payload.color
-              };
+              // Usar el user validado
               broadcastUserList(projectId);
             } else if (data.type === 'cursor_move') {
-              // Broadcast cursor coordinates to everyone else in the project
               room.forEach((c) => {
                 if (c.socket !== socket && c.state === 1 && client.user.userId) {
                   sendFrame(c.socket, {
@@ -1306,6 +1662,25 @@ server.on('upgrade', (req, socket) => {
                 }
               });
             } else if (data.type === 'update_state') {
+              // Validar permisos de edición (editor u owner)
+              if (client.user.role === 'viewer') {
+                console.log(`[WebSocket] Bloqueada modificación de Viewer: ${client.user.username}`);
+                sendFrame(socket, {
+                  type: 'save_ack',
+                  error: 'No tienes permisos de edición para este proyecto (Rol: Lector)'
+                });
+                
+                // Revertir cliente localmente
+                const currentDiskState = loadProjectState(projectId);
+                if (currentDiskState) {
+                  sendFrame(socket, {
+                    type: 'sync_state',
+                    payload: currentDiskState
+                  });
+                }
+                return;
+              }
+
               saveProjectState(projectId, data.payload);
 
               // Broadcast state update to all other open clients in this project

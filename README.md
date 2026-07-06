@@ -46,3 +46,30 @@ Necesitas tener **Node.js** instalado en tu computadora (cualquier versión reci
 ### Notas sobre la Colaboración
 *   El servidor utiliza el archivo `shared_state.json` para guardar en disco el estado colaborativo en tiempo real. 
 *   Además, cuenta con un sistema de **Backups Automáticos** que guarda copias de seguridad del estado a lo largo de los días en la carpeta `/backups`.
+
+## 👥 Sistema de Usuarios y Permisos (SQLite)
+
+El diseñador incluye un sistema robusto de autenticación, control de accesos y permisos por proyecto respaldado por **SQLite** nativo (mediante `node:sqlite`).
+
+### Roles de Colaboradores
+*   **Creador (Propietario):** El usuario que crea un proyecto tiene permisos de administración total sobre el mismo. Puede invitar a otros colaboradores y asignarles roles.
+*   **Editor:** Puede realizar modificaciones en tiempo real sobre el lienzo y guardar cambios.
+*   **Lector:** Modo de solo lectura. El lienzo se sincroniza con los cambios del equipo, pero los botones de edición y la transmisión de cambios por WebSockets están deshabilitados.
+
+### Gestión de Usuarios y Permisos
+*   **Registro e Inicio de Sesión:** Los usuarios pueden registrarse por sí mismos directamente desde el portal de acceso.
+*   **Panel de Administración (Solo Administradores):** Los administradores tienen acceso a un panel exclusivo en el Dashboard desde el cual pueden listar a todos los usuarios, crear nuevos, cambiar su nivel de privilegios (Usuario/Administrador) y eliminar cuentas.
+*   **Administración de Colaboradores:** El creador del proyecto o un administrador puede hacer clic en el botón **Miembros** dentro del lienzo para invitar a otros usuarios usando el selector desplegable.
+
+### Comandos de Administración CLI
+
+Si necesitas realizar configuraciones manuales desde la consola del servidor:
+
+*   **Restablecer privilegios y contraseña del usuario `admin`**:
+    ```bash
+    node scripts/reset-admin.js <nueva_contraseña>
+    ```
+*   **Crear un nuevo usuario manualmente**:
+    ```bash
+    node scripts/create-user.js <usuario> "<Nombre Visible>" [color_hex] [admin|true]
+    ```

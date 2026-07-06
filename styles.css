@@ -54,6 +54,14 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Global input/textarea placeholder styling for dark mode readability */
+input::placeholder,
+textarea::placeholder,
+.form-control::placeholder {
+  color: var(--color-text-muted) !important;
+  opacity: 0.65 !important;
+}
+
 /* App Layout */
 .app-container {
   display: flex;
@@ -1212,13 +1220,14 @@ select option {
 /* WebSocket Collaboration Styling */
 .collab-status-container {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   background-color: rgba(0, 0, 0, 0.25);
-  padding: 4px 8px;
+  padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid var(--color-border);
-  width: fit-content;
+  width: 100%;
 }
 
 .collab-badge {
@@ -1258,8 +1267,8 @@ select option {
 .collab-link-container {
   display: flex;
   align-items: center;
-  border-left: 1px solid var(--color-border);
-  padding-left: 8px;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .collab-link-container.hidden {

@@ -6,7 +6,7 @@ const projectId = urlParams.get('project') || '';
 
 const config = {
   projectId,
-  wsUrl: `ws://${window.location.hostname}:3000${projectId ? `/?project=${encodeURIComponent(projectId)}` : ''}`,
+  wsUrl: `ws://${window.location.hostname}:3000${projectId ? `/?project=${encodeURIComponent(projectId)}${urlParams.get('name') ? `&name=${encodeURIComponent(urlParams.get('name'))}` : ''}` : ''}`,
   defaultState: {
     tables: [],
     relationships: [],

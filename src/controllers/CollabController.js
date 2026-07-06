@@ -146,6 +146,8 @@ export class CollabController {
       this.updateActiveUsersList(data.payload);
     } else if (data.type === 'cursor_update') {
       this.updateCollaboratorCursor(data.payload);
+    } else if (data.type === 'save_ack' && data.error) {
+      this.uiManager.showToast(data.error, "error");
     }
   }
 
@@ -162,6 +164,7 @@ export class CollabController {
       document.getElementById("btn-dashboard-new-project").addEventListener("click", () => this.createNewProject());
     }
 
+    await this.setupUserIdentity();
     this.loadProjectsList();
     if (window.lucide) {
       window.lucide.createIcons();
@@ -193,21 +196,39 @@ export class CollabController {
 
       grid.innerHTML = "";
       projects.forEach(project => {
+        let roleText = 'Público';
+        let roleClass = 'badge bg-secondary';
+        if (project.role === 'owner') {
+          roleText = 'Creador';
+          roleClass = 'badge bg-primary';
+        } else if (project.role === 'editor') {
+          roleText = 'Editor';
+          roleClass = 'badge bg-success';
+        } else if (project.role === 'viewer') {
+          roleText = 'Lector';
+          roleClass = 'badge bg-info text-dark';
+        }
+
         const card = document.createElement("div");
         card.className = "project-card";
         card.innerHTML = `
           <div class="project-card-info">
-            <h3>${project.name}</h3>
-            <div class="project-card-stats">
-              <span><i data-lucide="database"></i> ${project.tableCount} tablas</span>
-              <span><i data-lucide="git-merge"></i> ${project.relationshipCount} rel.</span>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span class="${roleClass}" style="font-size: 0.7rem; font-weight: 600; padding: 3px 6px; border-radius: 4px;">${roleText}</span>
+              <span style="font-size: 0.7rem; color: var(--color-text-muted);">Por: ${project.owner_name || 'Sistema'}</span>
+            </div>
+            <h3 style="margin-top: 4px; font-size: 1.1rem; font-weight: 700; color: var(--color-text-main);">${project.name}</h3>
+            <div class="project-card-stats" style="margin-top: 8px; display: flex; gap: 12px; font-size: 0.8rem; color: var(--color-text-muted);">
+              <span><i data-lucide="database" style="width: 12px; height: 12px; vertical-align: middle; margin-right: 2px;"></i> ${project.tableCount} tablas</span>
+              <span><i data-lucide="git-merge" style="width: 12px; height: 12px; vertical-align: middle; margin-right: 2px;"></i> ${project.relationshipCount} rel.</span>
             </div>
           </div>
-          <div class="project-card-footer">
-            <span class="project-card-date">Modificado: ${new Date(project.lastModified).toLocaleDateString()}</span>
-            <button class="project-card-delete" title="Eliminar proyecto">
-              <i data-lucide="trash-2"></i>
-            </button>
+          <div class="project-card-footer" style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.03); padding-top: 10px;">
+            <span class="project-card-date" style="font-size: 0.75rem; color: var(--color-text-muted);">Modificado: ${new Date(project.lastModified).toLocaleDateString()}</span>
+            ${(project.role === 'owner' || project.role === 'public') ? `
+            <button class="project-card-delete" title="Eliminar proyecto" style="background: transparent; border: none; color: var(--color-danger); cursor: pointer; padding: 4px;">
+              <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+            </button>` : ''}
           </div>
         `;
 
@@ -217,25 +238,27 @@ export class CollabController {
         });
 
         const btnDelete = card.querySelector(".project-card-delete");
-        btnDelete.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          const confirmed = await this.uiManager.confirm(`¿Estás seguro de que deseas eliminar el proyecto "${project.name}"? Esta acción borrará permanentemente todos sus archivos.`, "Eliminar Proyecto");
-          if (confirmed) {
-            try {
-              const res = await fetch(`/api/delete-project?project=${encodeURIComponent(project.id)}`, { method: "POST" });
-              const result = await res.json();
-              if (result.success) {
-                this.uiManager.showToast(`Proyecto "${project.name}" eliminado.`, "success");
-                this.loadProjectsList();
-              } else {
-                this.uiManager.showToast("Error al eliminar el proyecto.", "error");
+        if (btnDelete) {
+          btnDelete.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            const confirmed = await this.uiManager.confirm(`¿Estás seguro de que deseas eliminar el proyecto "${project.name}"? Esta acción borrará permanentemente todos sus archivos.`, "Eliminar Proyecto");
+            if (confirmed) {
+              try {
+                const res = await fetch(`/api/delete-project?project=${encodeURIComponent(project.id)}`, { method: "POST" });
+                const result = await res.json();
+                if (result.success) {
+                  this.uiManager.showToast(`Proyecto "${project.name}" eliminado.`, "success");
+                  this.loadProjectsList();
+                } else {
+                  this.uiManager.showToast(result.error || "Error al eliminar el proyecto.", "error");
+                }
+              } catch (err) {
+                console.error(err);
+                this.uiManager.showToast("Error al conectar con el servidor.", "error");
               }
-            } catch (err) {
-              console.error(err);
-              this.uiManager.showToast("Error al conectar con el servidor.", "error");
             }
-          }
-        });
+          });
+        }
 
         grid.appendChild(card);
       });
@@ -258,83 +281,369 @@ export class CollabController {
   }
 
   setupUserIdentity() {
-    return new Promise((resolve) => {
-      const savedProfile = localStorage.getItem("erd_user_profile");
-      if (savedProfile) {
-        try {
-          this.myUser = JSON.parse(savedProfile);
-          if (!this.myUser.userId) {
-            this.myUser.userId = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-            localStorage.setItem("erd_user_profile", JSON.stringify(this.myUser));
-          }
-          if (this.webSocket.isConnected) {
-            this.webSocket.send({ type: 'join', payload: this.myUser });
-          }
-          resolve();
-          return;
-        } catch (e) {
-          localStorage.removeItem("erd_user_profile");
-        }
-      }
-
-      const modal = document.getElementById("user-identity-modal");
-      if (!modal) {
-        const name = prompt("Escribe tu nombre:") || `Usuario_${Math.floor(Math.random() * 1000)}`;
-        this.myUser = {
-          userId: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          username: name,
-          color: "#6366f1"
-        };
-        localStorage.setItem("erd_user_profile", JSON.stringify(this.myUser));
-        resolve();
-        return;
-      }
-
-      const colorDots = modal.querySelectorAll(".color-dot");
-      let selectedColor = "#6366f1";
-      colorDots.forEach(dot => {
-        dot.addEventListener("click", () => {
-          colorDots.forEach(d => d.classList.remove("selected"));
-          dot.classList.add("selected");
-          selectedColor = dot.dataset.color;
-        });
-      });
-
-      const btnSave = document.getElementById("btn-save-user-identity");
-      const nameInput = document.getElementById("user-name-input");
-
-      const handleSave = () => {
-        const username = nameInput.value.trim();
-        if (!username) {
-          this.uiManager.showToast("El nombre de usuario no puede estar vacío.", "error");
+    return new Promise(async (resolve) => {
+      try {
+        const response = await fetch('/api/me');
+        if (!response.ok) {
+          window.location.reload();
           return;
         }
-
+        
+        const userData = await response.json();
         this.myUser = {
-          userId: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          username: username,
-          color: selectedColor
+          userId: userData.userId,
+          username: userData.display_name,
+          color: userData.color || '#6366f1'
         };
-        localStorage.setItem("erd_user_profile", JSON.stringify(this.myUser));
-        modal.classList.add("hidden");
+
+        // Render user profile bar in sidebar
+        const avatarEl = document.getElementById('user-profile-avatar');
+        const nameEl = document.getElementById('user-profile-name');
+        if (avatarEl) {
+          avatarEl.style.backgroundColor = this.myUser.color;
+          avatarEl.textContent = this.myUser.username.charAt(0).toUpperCase();
+        }
+        if (nameEl) {
+          nameEl.textContent = this.myUser.username;
+        }
+
+        // Render user profile in dashboard
+        const dashAvatarEl = document.getElementById('dashboard-user-avatar');
+        const dashNameEl = document.getElementById('dashboard-user-name');
+        if (dashAvatarEl) {
+          dashAvatarEl.style.backgroundColor = this.myUser.color;
+          dashAvatarEl.textContent = this.myUser.username.charAt(0).toUpperCase();
+        }
+        if (dashNameEl) {
+          dashNameEl.textContent = this.myUser.username;
+        }
+
+        // Setup Logout event
+        const btnLogout = document.getElementById('btn-logout');
+        if (btnLogout) {
+          btnLogout.addEventListener('click', async () => {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.reload();
+          });
+        }
+
+        const btnDashLogout = document.getElementById('btn-dashboard-logout');
+        if (btnDashLogout) {
+          btnDashLogout.onclick = async () => {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.reload();
+          };
+        }
+
+        // Setup Admin Panel event
+        const btnAdminPanel = document.getElementById('btn-admin-panel');
+        if (btnAdminPanel && userData.is_admin === 1) {
+          btnAdminPanel.style.display = 'block';
+          btnAdminPanel.onclick = () => this.openAdminPanel();
+        }
+
+        const btnDashAdmin = document.getElementById('btn-dashboard-admin-panel');
+        if (btnDashAdmin && userData.is_admin === 1) {
+          btnDashAdmin.style.display = 'inline-flex';
+          btnDashAdmin.onclick = () => this.openAdminPanel();
+        }
+
+        // Setup Members Panel event
+        const btnManageMembers = document.getElementById('btn-manage-members');
+        if (btnManageMembers) {
+          btnManageMembers.onclick = () => this.openMembersPanel();
+        }
 
         if (this.webSocket.isConnected) {
           this.webSocket.send({ type: 'join', payload: this.myUser });
         }
-
-        resolve();
-      };
-
-      btnSave.replaceWith(btnSave.cloneNode(true));
-      document.getElementById("btn-save-user-identity").addEventListener("click", handleSave);
-      
-      nameInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") handleSave();
-      });
-
-      modal.classList.remove("hidden");
-      nameInput.focus();
+      } catch (e) {
+        console.error('Error al inicializar la identidad del usuario:', e);
+      }
+      resolve();
     });
+  }
+
+  async openMembersPanel() {
+    const modal = document.getElementById('members-modal');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+
+    const btnClose = document.getElementById('btn-close-members-modal');
+    btnClose.onclick = () => modal.classList.add('hidden');
+
+    const membersTable = document.getElementById('members-list-table');
+    const userSelect = document.getElementById('member-username-select');
+    const roleSelect = document.getElementById('member-role-select');
+    const btnAdd = document.getElementById('btn-add-member');
+
+    // Populate user select dropdown list
+    if (userSelect) {
+      userSelect.innerHTML = '<option value="">Cargando colaboradores...</option>';
+      try {
+        const res = await fetch(`/api/users/list?project=${encodeURIComponent(this.projectId)}`);
+        if (res.ok) {
+          const users = await res.json();
+          userSelect.innerHTML = '<option value="">Seleccionar colaborador...</option>';
+          users.forEach(user => {
+            const opt = document.createElement('option');
+            opt.value = user.username;
+            opt.textContent = `${user.display_name} (@${user.username})`;
+            userSelect.appendChild(opt);
+          });
+        } else {
+          userSelect.innerHTML = '<option value="">Error al cargar usuarios</option>';
+        }
+      } catch (e) {
+        console.error('Error al cargar colaboradores:', e);
+        userSelect.innerHTML = '<option value="">Error al cargar usuarios</option>';
+      }
+    }
+
+    const loadMembers = async () => {
+      membersTable.innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 10px;">Cargando...</td></tr>';
+      try {
+        const res = await fetch(`/api/projects/members?project=${encodeURIComponent(this.projectId)}`);
+        if (!res.ok) throw new Error();
+        const members = await res.json();
+        membersTable.innerHTML = '';
+        members.forEach(member => {
+          const isOwner = member.role === 'owner';
+          const tr = document.createElement('tr');
+          tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+          tr.innerHTML = `
+            <td style="padding: 8px; display: flex; align-items: center; gap: 8px; vertical-align: middle;">
+              <span style="width: 18px; height: 18px; border-radius: 50%; background-color: ${member.color || '#6366f1'}; display: inline-block;"></span>
+              <span style="color: var(--color-text-main); font-weight: 500;">${member.display_name}</span>
+            </td>
+            <td style="padding: 8px; vertical-align: middle;">
+              <span class="badge ${isOwner ? 'bg-primary' : member.role === 'editor' ? 'bg-success' : 'bg-secondary'}" style="font-size: 0.75rem;">
+                ${isOwner ? 'Creador' : member.role === 'editor' ? 'Editor' : 'Lector'}
+              </span>
+            </td>
+            <td style="padding: 8px; text-align: right; vertical-align: middle;">
+              ${!isOwner ? `<button class="btn-remove-member btn-icon" data-userid="${member.user_id}" style="border: none; background: transparent; color: var(--color-danger); cursor: pointer;"><i data-lucide="trash-2" style="width: 14px; height: 14px;"></i></button>` : ''}
+            </td>
+          `;
+          membersTable.appendChild(tr);
+        });
+
+        if (window.lucide) window.lucide.createIcons();
+
+        membersTable.querySelectorAll('.btn-remove-member').forEach(btn => {
+          btn.onclick = async () => {
+            const userId = btn.getAttribute('data-userid');
+            if (confirm('¿Estás seguro de que deseas remover a este colaborador?')) {
+              const removeRes = await fetch(`/api/projects/remove-member?project=${encodeURIComponent(this.projectId)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId })
+              });
+              if (removeRes.ok) {
+                this.uiManager.showToast('Colaborador removido.', 'success');
+                loadMembers();
+              } else {
+                const err = await removeRes.json();
+                this.uiManager.showToast(err.error || 'Error al remover colaborador.', 'error');
+              }
+            }
+          };
+        });
+      } catch (e) {
+        membersTable.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--color-danger); padding: 10px;">Error al cargar miembros</td></tr>';
+      }
+    };
+
+    btnAdd.onclick = async () => {
+      const username = userSelect ? userSelect.value : '';
+      const role = roleSelect.value;
+      if (!username) {
+        this.uiManager.showToast('Por favor, selecciona un colaborador.', 'warning');
+        return;
+      }
+
+      btnAdd.disabled = true;
+      try {
+        const res = await fetch(`/api/projects/members?project=${encodeURIComponent(this.projectId)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, role })
+        });
+        if (res.ok) {
+          this.uiManager.showToast('Colaborador agregado con éxito.', 'success');
+          if (userSelect) userSelect.value = '';
+          loadMembers();
+        } else {
+          const err = await res.json();
+          this.uiManager.showToast(err.error || 'Error al agregar colaborador.', 'error');
+        }
+      } catch (e) {
+        this.uiManager.showToast('Error de conexión.', 'error');
+      } finally {
+        btnAdd.disabled = false;
+      }
+    };
+
+    loadMembers();
+  }
+
+  async openAdminPanel() {
+    const modal = document.getElementById('admin-modal');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+
+    const btnClose = document.getElementById('btn-close-admin-modal');
+    btnClose.onclick = () => modal.classList.add('hidden');
+
+    const usersTable = document.getElementById('admin-users-list-table');
+    const usernameInput = document.getElementById('admin-user-username');
+    const displaynameInput = document.getElementById('admin-user-displayname');
+    const passwordInput = document.getElementById('admin-user-password');
+    const isadminInput = document.getElementById('admin-user-isadmin');
+    const btnAdd = document.getElementById('btn-admin-add-user');
+
+    let selectedAdminColor = '#6366f1';
+    const colorDots = modal.querySelectorAll('#admin-user-color-options .color-dot');
+    colorDots.forEach(dot => {
+      dot.onclick = () => {
+        colorDots.forEach(d => d.classList.remove('selected'));
+        dot.classList.add('selected');
+        selectedAdminColor = dot.getAttribute('data-color');
+      };
+    });
+
+    const loadUsers = async () => {
+      usersTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 10px;">Cargando...</td></tr>';
+      try {
+        const res = await fetch('/api/admin/users');
+        if (!res.ok) throw new Error();
+        const users = await res.json();
+        usersTable.innerHTML = '';
+        users.forEach(user => {
+          const tr = document.createElement('tr');
+          tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+          tr.innerHTML = `
+            <td style="padding: 10px; font-weight: 600; color: var(--color-text-main); vertical-align: middle;">${user.username}</td>
+            <td style="padding: 10px; vertical-align: middle;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="width: 14px; height: 14px; border-radius: 50%; background-color: ${user.color || '#6366f1'}; display: inline-block;"></span>
+                <span style="color: var(--color-text-main);">${user.display_name}</span>
+              </div>
+            </td>
+            <td style="padding: 10px; vertical-align: middle;">
+              <select class="admin-role-select form-select" data-userid="${user.id}" style="width: 130px; font-size: 0.8rem; background: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 2px 6px; border-radius: 4px;">
+                <option value="user" ${user.is_admin === 0 ? 'selected' : ''}>Usuario</option>
+                <option value="admin" ${user.is_admin === 1 ? 'selected' : ''}>Administrador</option>
+              </select>
+            </td>
+            <td style="padding: 10px; text-align: right; vertical-align: middle;">
+              <button class="btn-admin-delete-user btn-icon" data-userid="${user.id}" style="border: none; background: transparent; color: var(--color-danger); cursor: pointer;"><i data-lucide="trash-2" style="width: 14px; height: 14px;"></i></button>
+            </td>
+          `;
+          usersTable.appendChild(tr);
+        });
+
+        if (window.lucide) window.lucide.createIcons();
+
+        usersTable.querySelectorAll('.admin-role-select').forEach(select => {
+          select.onchange = async () => {
+            const userId = select.getAttribute('data-userid');
+            const newRole = select.value;
+            const userObj = users.find(u => u.id === userId);
+            if (!userObj) return;
+
+            const updateRes = await fetch('/api/admin/update-user', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId,
+                displayName: userObj.display_name,
+                color: userObj.color,
+                is_admin: newRole === 'admin'
+              })
+            });
+
+            if (updateRes.ok) {
+              this.uiManager.showToast('Rol de usuario actualizado.', 'success');
+              loadUsers();
+            } else {
+              const err = await updateRes.json();
+              this.uiManager.showToast(err.error || 'Error al actualizar usuario.', 'error');
+              loadUsers();
+            }
+          };
+        });
+
+        usersTable.querySelectorAll('.btn-admin-delete-user').forEach(btn => {
+          btn.onclick = async () => {
+            const userId = btn.getAttribute('data-userid');
+            if (confirm('¿Estás seguro de que deseas eliminar permanentemente este usuario? Se cerrarán todas sus sesiones.')) {
+              const delRes = await fetch('/api/admin/delete-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId })
+              });
+              if (delRes.ok) {
+                this.uiManager.showToast('Usuario eliminado con éxito.', 'success');
+                loadUsers();
+              } else {
+                const err = await delRes.json();
+                this.uiManager.showToast(err.error || 'Error al eliminar usuario.', 'error');
+              }
+            }
+          };
+        });
+      } catch (e) {
+        usersTable.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--color-danger); padding: 10px;">Error al cargar lista de usuarios</td></tr>';
+      }
+    };
+
+    btnAdd.onclick = async () => {
+      const username = usernameInput.value.trim();
+      const displayName = displaynameInput.value.trim();
+      const password = passwordInput.value;
+      const is_admin = isadminInput.checked;
+
+      if (!username || !displayName || !password) {
+        this.uiManager.showToast('Faltan campos obligatorios.', 'error');
+        return;
+      }
+
+      btnAdd.disabled = true;
+      try {
+        const res = await fetch('/api/admin/create-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username,
+            displayName,
+            password,
+            color: selectedAdminColor,
+            is_admin
+          })
+        });
+
+        if (res.ok) {
+          this.uiManager.showToast('Usuario creado con éxito.', 'success');
+          usernameInput.value = '';
+          displaynameInput.value = '';
+          passwordInput.value = '';
+          isadminInput.checked = false;
+          loadUsers();
+        } else {
+          const err = await res.json();
+          this.uiManager.showToast(err.error || 'Error al crear usuario.', 'error');
+        }
+      } catch (e) {
+        this.uiManager.showToast('Error de conexión.', 'error');
+      } finally {
+        btnAdd.disabled = false;
+      }
+    };
+
+    loadUsers();
   }
 
   updateActiveUsersList(users) {

@@ -9,10 +9,10 @@
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-		<script src="https://cdn.jsdelivr.net/npm/lucide@latest"></script>
+		<script src="https://unpkg.com/lucide@latest"></script>
 		<script>
 			if (!window.lucide) {
-				document.write('<script src="https://unpkg.com/lucide@latest"><\/script>');
+				document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.395.0/umd/lucide.min.js"><\/script>');
 			}
 		</script>
 		<!-- html2canvas (CDN for exporting canvas to PNG) -->
@@ -35,6 +35,22 @@
 								Gnome <span>ERD</span>
 							</h2>
 						</div>
+
+						<!-- User profile and logout -->
+						<div class="user-profile-bar" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; border: 1px solid var(--color-border); border-radius: 8px; margin-bottom: 4px; background-color: rgba(255, 255, 255, 0.03);">
+							<div style="display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 200px;">
+								<span id="user-profile-avatar" style="width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: white; background-color: var(--color-primary); flex-shrink: 0;"></span>
+								<span id="user-profile-name" style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-main); overflow: hidden; text-overflow: ellipsis;"></span>
+							</div>
+							<div style="display: flex; align-items: center; gap: 4px;">
+								<button id="btn-admin-panel" class="btn-icon" title="Panel de Administración de Usuarios" style="border: none; background: transparent; padding: 4px; color: var(--color-text-muted); cursor: pointer; display: none;">
+									<i data-lucide="shield-check" style="width: 15px; height: 15px; color: var(--color-success-light);"></i>
+								</button>
+								<button id="btn-logout" class="btn-icon" title="Cerrar Sesión" style="border: none; background: transparent; padding: 4px; color: var(--color-text-muted); cursor: pointer;">
+									<i data-lucide="log-out" style="width: 15px; height: 15px;"></i>
+								</button>
+							</div>
+						</div>
 						
 						<!-- Project Title and Rename Button -->
 						<div class="project-title-container">
@@ -54,6 +70,9 @@
 								<input type="text" id="share-link-input" readonly value="" style="display: none;" />
 								<button id="btn-copy-share" class="btn-copy-share-icon" title="Copiar enlace de invitación">
 									<i data-lucide="share-2" style="width: 11px; height: 11px;"></i> Compartir
+								</button>
+								<button id="btn-manage-members" class="btn-manage-members-icon" title="Administrar Colaboradores" style="margin: 0; background: transparent; border: 1px solid var(--color-border); color: var(--color-text-main); border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+									<i data-lucide="users" style="width: 11px; height: 11px;"></i> Miembros
 								</button>
 							</span>
 						</div>
@@ -333,9 +352,20 @@
 		<div id="project-dashboard" class="dashboard-container hidden">
 			<div class="dashboard-header">
 				<h1 class="app-logo"><img src="projects/imgs/gnomo-logo.png" alt="gnome logo" style="width: 50px; height: 50px; object-fit: contain;"> Gnome <span>ERD</span></h1>
-				<div style="display: flex; gap: 10px;">
-					<button id="btn-dashboard-ai-config" class="btn btn-secondary" title="Configuración de IA y Prompts"><i data-lucide="settings"></i> Configuración IA</button>
-					<button id="btn-dashboard-new-project" class="btn btn-primary"><i data-lucide="plus"></i> Nuevo Proyecto</button>
+				<div style="display: flex; gap: 10px; align-items: center;">
+					<!-- User profile in dashboard -->
+					<div id="dashboard-user-profile" style="display: flex; align-items: center; gap: 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--color-border); padding: 5px 12px; border-radius: 20px;">
+						<span id="dashboard-user-avatar" style="width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: white; background-color: var(--color-primary); flex-shrink: 0;"></span>
+						<span id="dashboard-user-name" style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-main);"></span>
+					</div>
+					<button id="btn-dashboard-admin-panel" class="btn btn-secondary" title="Panel de Administración de Usuarios" style="display: none; align-items: center; gap: 4px;">
+						<i data-lucide="shield-check" style="width: 14px; height: 14px; color: var(--color-success-light);"></i> Admin
+					</button>
+					<button id="btn-dashboard-ai-config" class="btn btn-secondary" title="Configuración de IA y Prompts"><i data-lucide="settings" style="width: 14px; height: 14px;"></i> Configuración IA</button>
+					<button id="btn-dashboard-new-project" class="btn btn-primary"><i data-lucide="plus" style="width: 14px; height: 14px;"></i> Nuevo Proyecto</button>
+					<button id="btn-dashboard-logout" class="btn btn-secondary" title="Cerrar Sesión" style="display: flex; align-items: center; gap: 4px; color: var(--color-danger);">
+						<i data-lucide="log-out" style="width: 14px; height: 14px;"></i> Salir
+					</button>
 				</div>
 			</div>
 			<div class="dashboard-content">
@@ -666,6 +696,106 @@
 						</div>
 					</div>
 
+				</div>
+			</div>
+		</div>
+
+		<!-- Members Management Modal -->
+		<div id="members-modal" class="modal hidden">
+			<div class="modal-content" style="max-width: 500px;">
+				<div class="modal-header">
+					<h2>Administrar Colaboradores</h2>
+					<button id="btn-close-members-modal" class="btn-icon"><i data-lucide="x"></i></button>
+				</div>
+				<div class="modal-body" style="padding: 20px 24px;">
+					<div id="member-add-container" class="mb-3">
+						<label class="form-label" style="font-weight: 600; font-size: 0.9rem; color: var(--color-text-main);">Agregar Colaborador</label>
+						<div style="display: flex; gap: 8px;">
+							<select id="member-username-select" class="form-select" style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 6px 12px; border-radius: 4px; flex: 1; font-size: 0.9rem;">
+								<option value="">Seleccionar colaborador...</option>
+							</select>
+							<select id="member-role-select" class="form-select" style="width: 120px; background-color: var(--color-bg-app); border: 1px solid var(--color-border); color: white; border-radius: 4px; padding: 6px; font-size: 0.9rem;">
+								<option value="editor">Editor</option>
+								<option value="viewer">Lector</option>
+							</select>
+							<button id="btn-add-member" class="btn btn-primary" style="padding: 6px 16px; border-radius: 4px; font-weight: 600; font-size: 0.9rem;">Agregar</button>
+						</div>
+					</div>
+					<hr style="border-top: 1px solid var(--color-border); margin: 20px 0;"/>
+					<h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: var(--color-text-main);">Lista de Colaboradores</h3>
+					<div style="max-height: 250px; overflow-y: auto;">
+						<table class="table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; color: var(--color-text-muted);">
+							<thead>
+								<tr style="border-bottom: 1px solid var(--color-border);">
+									<th style="padding: 8px; color: var(--color-text-main);">Colaborador</th>
+									<th style="padding: 8px; color: var(--color-text-main);">Rol</th>
+									<th style="padding: 8px; text-align: right; color: var(--color-text-main);">Acciones</th>
+								</tr>
+							</thead>
+							<tbody id="members-list-table">
+								<!-- Dynamic member list rows -->
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Admin Panel Modal -->
+		<div id="admin-modal" class="modal hidden">
+			<div class="modal-content" style="max-width: 700px;">
+				<div class="modal-header">
+					<h2>Panel de Administración de Usuarios</h2>
+					<button id="btn-close-admin-modal" class="btn-icon"><i data-lucide="x"></i></button>
+				</div>
+				<div class="modal-body" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 20px;">
+					<!-- Add new user section -->
+					<div style="background-color: rgba(255, 255, 255, 0.02); border: 1px solid var(--color-border); padding: 15px; border-radius: 8px;">
+						<h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 12px; color: var(--color-text-main);">Crear Nuevo Usuario</h3>
+						<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+							<input type="text" id="admin-user-username" class="form-control" placeholder="Usuario (ej: ana)" style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 6px 12px; border-radius: 4px; font-size: 0.85rem;" />
+							<input type="text" id="admin-user-displayname" class="form-control" placeholder="Nombre Visible (ej: Ana G.)" style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 6px 12px; border-radius: 4px; font-size: 0.85rem;" />
+							<input type="password" id="admin-user-password" class="form-control" placeholder="Contraseña" style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 6px 12px; border-radius: 4px; font-size: 0.85rem;" />
+						</div>
+						<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+							<div style="display: flex; align-items: center; gap: 8px;">
+								<span style="font-size: 0.85rem; color: var(--color-text-muted);">Color:</span>
+								<div class="color-options" id="admin-user-color-options" style="display: flex; gap: 6px;">
+									<div class="color-dot selected" style="background-color: #6366f1; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" data-color="#6366f1"></div>
+									<div class="color-dot" style="background-color: #10b981; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" data-color="#10b981"></div>
+									<div class="color-dot" style="background-color: #3b82f6; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" data-color="#3b82f6"></div>
+									<div class="color-dot" style="background-color: #ef4444; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" data-color="#ef4444"></div>
+									<div class="color-dot" style="background-color: #f59e0b; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" data-color="#f59e0b"></div>
+								</div>
+							</div>
+							<div style="display: flex; align-items: center; gap: 12px;">
+								<label style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--color-text-muted); cursor: pointer;">
+									<input type="checkbox" id="admin-user-isadmin" style="cursor: pointer;" /> ¿Es Administrador?
+								</label>
+								<button id="btn-admin-add-user" class="btn btn-primary" style="padding: 6px 16px; border-radius: 4px; font-weight: 600; font-size: 0.85rem;">Crear</button>
+							</div>
+						</div>
+					</div>
+
+					<!-- Users list -->
+					<div>
+						<h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: var(--color-text-main);">Usuarios Registrados</h3>
+						<div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--color-border); border-radius: 6px;">
+							<table class="table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 0; background-color: transparent;">
+								<thead style="background-color: rgba(255, 255, 255, 0.02); position: sticky; top: 0; z-index: 1;">
+									<tr style="border-bottom: 1px solid var(--color-border);">
+										<th style="padding: 10px; color: var(--color-text-main);">Usuario</th>
+										<th style="padding: 10px; color: var(--color-text-main);">Nombre Visible</th>
+										<th style="padding: 10px; color: var(--color-text-main);">Rol</th>
+										<th style="padding: 10px; text-align: right; color: var(--color-text-main);">Acciones</th>
+									</tr>
+								</thead>
+								<tbody id="admin-users-list-table">
+									<!-- Dynamic admin users rows -->
+								</tbody>
+							</table>
+						</div>
+					</div>
 				</div>
 			</div>
 		</div>

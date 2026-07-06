@@ -89,7 +89,25 @@ All agents must ensure that any state-altering action (adding a table, moving a 
 
 The `StateManager` handles the broadcasting of `update_state` messages to all connected clients through the `WebSocketService`.
 
+## 🗄️ Database & Authentication Architecture (SQLite)
+
+We use a local SQLite database (`data/app.db`) managed via the native `node:sqlite` (`DatabaseSync`) module.
+
+### Database Tables (STRICT Mode)
+1. **`users`:** Stores user credentials. Passwords are encrypted using `crypto.scrypt` with a unique salt per user.
+2. **`sessions`:** Cookie-based session tokens (`token`, `user_id`, `expires_at`).
+3. **`projects`:** Mapping of project IDs to user-friendly `display_name` fields and owner links.
+4. **`project_members`:** Junction table for project memberships. Roles are `owner`, `editor`, and `viewer` (reader).
+5. **`ai_prompts`:** Custom prompt templates editable from the database.
+
+### Role Authorization Enforcement
+*   **Editor Level Checks:** Any write requests (like state saving) or WebSocket `update_state` frames must check the user's role. If the role is `viewer`, the request must be rejected (returning a `403 Forbidden` error on HTTP or broadcasting a rejection message/toast on WebSocket).
+*   **Admin Level Checks:** Users with `is_admin = 1` can access the `/api/admin/*` management routes.
+*   **WebSocket Upgrades:** During WebSocket handshake (`upgrade` event), the session cookie is parsed and validated. Connections for non-members of a project must be immediately rejected with a `403 Forbidden` response.
+
 ## ⚠️ Security & Safety
 - **Directory Traversal:** The server includes checks to ensure `filePath` stays within `__dirname`. Do not remove these.
 - **Input Sanitization:** When rendering user-provided names (like table names), ensure they are sanitized to prevent XSS and invalid SQL generation.
 - **Destructive Actions:** Always implement `confirm()` dialogs for actions like "Clear All" or "Delete Table".
+- **CLI Commands:** Use `node scripts/create-user.js` and `node scripts/reset-admin.js` for command-line administrative tasks.
+
