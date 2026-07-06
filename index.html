@@ -32,7 +32,7 @@
 						<div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
 							<h2 class="app-logo" id="logo-back-to-dashboard" style="cursor: pointer;" title="Volver a Mis Proyectos">
 								<img src="projects/imgs/gnomo-logo.png" alt="gnome logo" style="width: 30px; height: 30px; object-fit: contain; margin-right: 4px;">
-								gnome <span>ERD</span>
+								Gnome <span>ERD</span>
 							</h2>
 						</div>
 						
@@ -76,10 +76,7 @@
 					<!-- Dynamically populated tables accordion -->
 				</div>
 
-				<!-- Quick stats/storage info -->
-				<div class="sidebar-footer">
-					<div class="storage-info"><i data-lucide="save"></i> Auto-guardado activo</div>
-				</div>
+
 			</aside>
 
 			<!-- Main Workspace -->
@@ -118,6 +115,13 @@
 					
 					</div>
 					<div class="toolbar-right">
+						<div class="tb-group">
+							<div class="tb-group-buttons">
+								<button id="btn-ai-config-trigger" class="btn btn-tb" title="Configuración de IA y Prompts">
+									<i data-lucide="settings"></i> Configuración
+								</button>
+							</div>
+						</div>
 					</div>
 				</header>
 
@@ -328,7 +332,7 @@
 		<!-- Project Dashboard (Shown when no project in URL) -->
 		<div id="project-dashboard" class="dashboard-container hidden">
 			<div class="dashboard-header">
-				<h1 class="app-logo"><img src="projects/imgs/gnomo-logo.png" alt="gnome logo" style="width: 50px; height: 50px; object-fit: contain;"> gnome <span>ERD</span></h1>
+				<h1 class="app-logo"><img src="projects/imgs/gnomo-logo.png" alt="gnome logo" style="width: 50px; height: 50px; object-fit: contain;"> Gnome <span>ERD</span></h1>
 				<div style="display: flex; gap: 10px;">
 					<button id="btn-dashboard-ai-config" class="btn btn-secondary" title="Configuración de IA y Prompts"><i data-lucide="settings"></i> Configuración IA</button>
 					<button id="btn-dashboard-new-project" class="btn btn-primary"><i data-lucide="plus"></i> Nuevo Proyecto</button>
@@ -381,14 +385,15 @@
 			<div class="modal-content" style="max-width: 600px;">
 				<div class="modal-header">
 					<h2 style="display: flex; align-items: center; gap: 8px;">
-						<i data-lucide="sparkles" style="color: var(--color-primary);"></i>
-						Asistente de IA
+						<i id="ai-modal-icon-sparkles" data-lucide="sparkles" style="color: var(--color-primary);"></i>
+						<i id="ai-modal-icon-settings" data-lucide="settings" style="color: var(--color-primary);" class="hidden"></i>
+						<span id="ai-modal-title-text">Asistente de IA</span>
 					</h2>
 					<button id="btn-close-ai-modal" class="btn-icon"><i data-lucide="x"></i></button>
 				</div>
 				<div class="modal-body">
 					<!-- Modal Tabs -->
-					<div class="ai-tabs" style="display: flex; border-bottom: 1px solid var(--color-border); margin-bottom: 20px;">
+					<div id="ai-tabs-container" class="ai-tabs" style="display: flex; border-bottom: 1px solid var(--color-border); margin-bottom: 20px;">
 						<button id="tab-ai-assistant" class="ai-tab-btn active" style="flex: 1; padding: 10px; background: none; border: none; border-bottom: 2px solid var(--color-primary); color: var(--color-text-main); font-weight: 600; cursor: pointer; text-align: center;">Asistente</button>
 						<button id="tab-ai-config" class="ai-tab-btn" style="flex: 1; padding: 10px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--color-text-muted); font-weight: 500; cursor: pointer; text-align: center;">Configuración de IA</button>
 						<button id="tab-ai-prompts" class="ai-tab-btn" style="flex: 1; padding: 10px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--color-text-muted); font-weight: 500; cursor: pointer; text-align: center;">Prompts</button>

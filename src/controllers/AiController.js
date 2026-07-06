@@ -31,6 +31,15 @@ export class AiController {
     const viewConfig = document.getElementById("ai-config-view");
     const viewPrompts = document.getElementById("ai-prompts-view");
 
+    // Triggers and Header Elements
+    const btnConfigTrigger = document.getElementById("btn-ai-config-trigger");
+    const iconSparkles = document.getElementById("ai-modal-icon-sparkles");
+    const iconSettings = document.getElementById("ai-modal-icon-settings");
+    const titleText = document.getElementById("ai-modal-title-text");
+    const tabsContainer = document.getElementById("ai-tabs-container");
+
+    let currentModalMode = 'assistant'; // 'assistant' or 'settings'
+
     // Config Fields
     const selectProvider = document.getElementById("ai-provider");
     const inputModel = document.getElementById("ai-model");
@@ -288,6 +297,7 @@ export class AiController {
 
     if (btnTrigger) {
       btnTrigger.addEventListener("click", () => {
+        currentModalMode = 'assistant';
         openConfigModal();
         switchTab("assistant");
         updateContextDepthOptions();
@@ -297,6 +307,16 @@ export class AiController {
 
     if (btnDashboardConfig) {
       btnDashboardConfig.addEventListener("click", () => {
+        currentModalMode = 'settings';
+        openConfigModal();
+        switchTab("config");
+        this.uiManager.openAiModal(modal);
+      });
+    }
+
+    if (btnConfigTrigger) {
+      btnConfigTrigger.addEventListener("click", () => {
+        currentModalMode = 'settings';
         openConfigModal();
         switchTab("config");
         this.uiManager.openAiModal(modal);
@@ -382,7 +402,9 @@ export class AiController {
     // Tabs switching helper
     function switchTab(tab) {
       const isDashboard = !window.location.search.includes("project=");
-      if (isDashboard && tab === "assistant") {
+      const isSettingsMode = isDashboard || currentModalMode === 'settings';
+
+      if (isSettingsMode && tab === "assistant") {
         tab = "config";
       }
 
@@ -411,9 +433,31 @@ export class AiController {
         loadPromptsFromServer();
       }
 
-      // Ocultar la pestaña del Asistente si estamos en el dashboard
+      // Configurar visibilidad del contenedor de pestañas
+      if (tabsContainer) {
+        tabsContainer.style.display = isSettingsMode ? "flex" : "none";
+      }
+
+      // Ocultar la pestaña del Asistente en modo configuración, y viceversa
       if (tabAssistant) {
-        tabAssistant.style.display = isDashboard ? "none" : "block";
+        tabAssistant.style.display = isSettingsMode ? "none" : "block";
+      }
+      if (tabConfig) {
+        tabConfig.style.display = isSettingsMode ? "block" : "none";
+      }
+      if (tabPrompts) {
+        tabPrompts.style.display = isSettingsMode ? "block" : "none";
+      }
+
+      // Modificar el título e icono del modal de forma dinámica
+      if (isSettingsMode) {
+        if (iconSparkles) iconSparkles.classList.add("hidden");
+        if (iconSettings) iconSettings.classList.remove("hidden");
+        if (titleText) titleText.textContent = "Configuración de IA y Prompts";
+      } else {
+        if (iconSparkles) iconSparkles.classList.remove("hidden");
+        if (iconSettings) iconSettings.classList.add("hidden");
+        if (titleText) titleText.textContent = "Asistente de IA";
       }
     }
 
