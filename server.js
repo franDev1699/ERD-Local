@@ -14,6 +14,8 @@ if (!fs.existsSync(PROJECTS_DIR)) {
   fs.mkdirSync(PROJECTS_DIR, { recursive: true });
 }
 
+
+
 // Helper to get safe path for a project file
 function getProjectPath(projectId) {
   const safeId = projectId.replace(/[^a-zA-Z0-9_-]/g, '_');

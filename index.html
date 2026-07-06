@@ -4,7 +4,7 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<meta name="description" content="Diseñador de diagramas de bases de datos interactivo y local. Crea tablas, relaciones y exporta a SQL." />
-		<title>Local ERD Designer</title>
+		<title>Gnome ERD</title>
 		<!-- Google Fonts: Outfit & Inter -->
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -31,8 +31,8 @@
 					<div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
 						<div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
 							<h2 class="app-logo" id="logo-back-to-dashboard" style="cursor: pointer;" title="Volver a Mis Proyectos">
-								<i data-lucide="layout-dashboard" style="width: 18px; height: 18px; color: var(--color-primary); margin-right: 4px;"></i>
-								ERD <span>Designer</span>
+								<img src="projects/imgs/gnomo-logo.png" alt="gnome logo" style="width: 30px; height: 30px; object-fit: contain; margin-right: 4px;">
+								gnome <span>ERD</span>
 							</h2>
 						</div>
 						
@@ -328,7 +328,7 @@
 		<!-- Project Dashboard (Shown when no project in URL) -->
 		<div id="project-dashboard" class="dashboard-container hidden">
 			<div class="dashboard-header">
-				<h1 class="app-logo"><i data-lucide="database" style="color: var(--color-primary);"></i> ERD <span>Collaborative</span></h1>
+				<h1 class="app-logo"><img src="projects/imgs/gnomo-logo.png" alt="gnome logo" style="width: 50px; height: 50px; object-fit: contain;"> gnome <span>ERD</span></h1>
 				<div style="display: flex; gap: 10px;">
 					<button id="btn-dashboard-ai-config" class="btn btn-secondary" title="Configuración de IA y Prompts"><i data-lucide="settings"></i> Configuración IA</button>
 					<button id="btn-dashboard-new-project" class="btn btn-primary"><i data-lucide="plus"></i> Nuevo Proyecto</button>
