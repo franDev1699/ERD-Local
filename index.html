@@ -28,16 +28,45 @@
 			<aside class="sidebar">
 				<div class="sidebar-resizer"></div>
 				<div class="sidebar-header">
-					<div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-						<h2 class="app-logo" id="logo-back-to-dashboard" style="cursor: pointer;" title="Volver a Mis Proyectos">
-							<i data-lucide="layout-dashboard" style="width: 18px; height: 18px; color: var(--color-primary); margin-right: 4px;"></i>
-							ERD <span>Designer</span>
-						</h2>
+					<div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+						<div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+							<h2 class="app-logo" id="logo-back-to-dashboard" style="cursor: pointer;" title="Volver a Mis Proyectos">
+								<i data-lucide="layout-dashboard" style="width: 18px; height: 18px; color: var(--color-primary); margin-right: 4px;"></i>
+								ERD <span>Designer</span>
+							</h2>
+						</div>
+						
+						<!-- Project Title and Rename Button -->
+						<div class="project-title-container">
+							<h1 id="project-title" style="font-size: 1.15rem; font-weight: 700; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; font-family: var(--font-family-display);">Mi Diagrama Local</h1>
+							<button id="btn-rename-project" class="btn-rename-project-icon" title="Cambiar nombre del proyecto">
+								<i data-lucide="pen" style="width: 11px; height: 11px;"></i>
+							</button>
+						</div>
+
+						<!-- WebSocket collaboration status -->
+						<div id="collab-status" class="collab-status-container">
+							<span class="collab-badge status-disconnected">
+								<span class="status-dot"></span>
+								<span class="status-text" id="collab-status-text">Modo Local</span>
+							</span>
+							<span id="collab-link-container" class="collab-link-container hidden">
+								<input type="text" id="share-link-input" readonly value="" style="display: none;" />
+								<button id="btn-copy-share" class="btn-copy-share-icon" title="Copiar enlace de invitación">
+									<i data-lucide="share-2" style="width: 11px; height: 11px;"></i> Compartir
+								</button>
+							</span>
+						</div>
+
+						<!-- Active Collab Users List -->
+						<div id="active-users-list" class="active-users-list hidden">
+							<!-- Dynamic user avatars -->
+						</div>
 					</div>
 				</div>
 
 				<!-- General Actions Panel -->
-				<div class="control-panel" style="display: flex; flex-direction: column; gap: 8px;">
+				<div class="control-panel" style="display: flex; flex-direction: row; gap: 8px;">
 					<button id="btn-add-table" class="btn btn-primary btn-full"><i data-lucide="plus"></i> Nueva Tabla</button>
 					<button id="btn-add-group" class="btn btn-secondary btn-full"><i data-lucide="folder-plus"></i> Nuevo Grupo</button>
 				</div>
@@ -56,30 +85,8 @@
 			<!-- Main Workspace -->
 			<main class="workspace">
 				<!-- Toolbar -->
-				<header class="toolbar" style="padding-block: 20px">
+				<header class="toolbar">
 					<div class="toolbar-left">
-						<h1 id="project-title">Mi Diagrama Local</h1>
-						<button id="btn-rename-project" class="btn-icon btn-tb" title="Cambiar nombre del proyecto"><i data-lucide="pen"></i></button>
-
-						<!-- WebSocket collaboration status -->
-						<div id="collab-status" class="collab-status-container">
-							<span class="collab-badge status-disconnected">
-								<span class="status-dot"></span>
-								<span class="status-text" id="collab-status-text">Modo Local</span>
-							</span>
-							<span id="collab-link-container" class="collab-link-container hidden">
-								<span class="share-label">Compartir:</span>
-								<input type="text" id="share-link-input" readonly value="" />
-								<button id="btn-copy-share" class="btn-icon" title="Copiar enlace"><i data-lucide="copy"></i></button>
-							</span>
-						</div>
-
-						<!-- Active Collab Users List -->
-						<div id="active-users-list" class="active-users-list hidden">
-							<!-- Dynamic user avatars -->
-						</div>
-					</div>
-					<div class="toolbar-right">
 						<!-- Grupo: Proyecto -->
 						<div class="tb-group">
 							<div class="tb-group-buttons">
@@ -108,6 +115,9 @@
 							</div>
 						</div>
 						<input type="file" id="input-import-json" accept=".json" style="display: none" />
+					
+					</div>
+					<div class="toolbar-right">
 					</div>
 				</header>
 

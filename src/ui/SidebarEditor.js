@@ -443,35 +443,56 @@ export class SidebarEditor {
     });
     content.appendChild(fieldsList);
 
+    // Actions Row Container
+    const actionsRow = document.createElement("div");
+    actionsRow.style.display = "flex";
+    actionsRow.style.flexDirection = "row";
+    actionsRow.style.gap = "6px";
+    actionsRow.style.marginTop = "12px";
+
     // Button: Add Field
     const addFieldBtn = document.createElement("button");
-    addFieldBtn.className = "btn btn-secondary btn-sm btn-full";
-    addFieldBtn.style.marginTop = "10px";
-    addFieldBtn.innerHTML = `<i data-lucide="plus"></i> Agregar Campo`;
+    addFieldBtn.className = "btn btn-secondary btn-sm";
+    addFieldBtn.style.flex = "1";
+    addFieldBtn.style.padding = "6px 2px";
+    addFieldBtn.style.gap = "4px";
+    addFieldBtn.style.fontSize = "11px";
+    addFieldBtn.style.whiteSpace = "nowrap";
+    addFieldBtn.innerHTML = `<i data-lucide="plus" style="width: 12px; height: 12px;"></i> Campo`;
     addFieldBtn.addEventListener("click", () => {
       this.onFieldAdd(table.id);
     });
-    content.appendChild(addFieldBtn);
+    actionsRow.appendChild(addFieldBtn);
 
     // Button: Duplicate Table
     const duplicateTableBtn = document.createElement("button");
-    duplicateTableBtn.className = "btn btn-secondary btn-sm btn-full";
-    duplicateTableBtn.style.marginTop = "8px";
-    duplicateTableBtn.innerHTML = `<i data-lucide="copy"></i> Duplicar Tabla`;
+    duplicateTableBtn.className = "btn btn-secondary btn-sm";
+    duplicateTableBtn.style.flex = "1";
+    duplicateTableBtn.style.padding = "6px 2px";
+    duplicateTableBtn.style.gap = "4px";
+    duplicateTableBtn.style.fontSize = "11px";
+    duplicateTableBtn.style.whiteSpace = "nowrap";
+    duplicateTableBtn.innerHTML = `<i data-lucide="copy" style="width: 12px; height: 12px;"></i> Duplicar`;
     duplicateTableBtn.addEventListener("click", () => {
       if (this.onTableDuplicate) this.onTableDuplicate(table.id);
     });
-    content.appendChild(duplicateTableBtn);
+    actionsRow.appendChild(duplicateTableBtn);
 
     // Button: Delete Table
     const deleteTableBtn = document.createElement("button");
-    deleteTableBtn.className = "btn btn-danger-outline btn-sm btn-full";
-    deleteTableBtn.style.marginTop = "8px";
-    deleteTableBtn.innerHTML = `<i data-lucide="trash-2"></i> Eliminar Tabla`;
+    deleteTableBtn.className = "btn btn-danger-outline btn-sm";
+    deleteTableBtn.style.flex = "1";
+    deleteTableBtn.style.padding = "6px 2px";
+    deleteTableBtn.style.gap = "4px";
+    deleteTableBtn.style.fontSize = "11px";
+    deleteTableBtn.style.whiteSpace = "nowrap";
+    deleteTableBtn.innerHTML = `<i data-lucide="trash-2" style="width: 12px; height: 12px;"></i> Eliminar`;
     deleteTableBtn.addEventListener("click", () => {
       this.onTableDelete(table.id);
     });
-    content.appendChild(deleteTableBtn);
+    actionsRow.appendChild(deleteTableBtn);
+
+    content.appendChild(actionsRow);
 
     accordionItem.appendChild(content);
     return accordionItem;
@@ -494,8 +515,11 @@ export class SidebarEditor {
     const typeSelectHtml = this._getTypeSelectHtml(baseType);
 
     const isNoLength = TYPES_WITHOUT_LENGTH.has(baseType);
+    const isEnumOrSet = baseType === 'ENUM' || baseType === 'SET';
     const lengthVal = isNoLength ? "" : length;
     const disabledAttr = isNoLength ? "disabled" : "";
+    const enumTriggerClass = isEnumOrSet ? "is-enum-trigger" : "";
+    const readonlyAttr = isEnumOrSet ? "readonly" : "";
 
     // Proactive sanity check: if stored field type has invalid length (like BOOLEAN(255)), clean it up.
     if (isNoLength && field.type !== baseType) {
@@ -509,7 +533,7 @@ export class SidebarEditor {
         <div class="field-drag-handle" title="Arrastrar para mover · Ctrl+Arrastrar para copiar"><i data-lucide="grip-vertical"></i></div>
         <input type="text" class="field-name-input" value="${field.name}" placeholder="nombre_campo">
         ${typeSelectHtml}
-        <input type="text" class="field-length-input" value="${lengthVal}" placeholder="Long." title="Longitud o Valores (ej: 255, 10,2 o 'a','b')" ${disabledAttr}>
+        <input type="text" class="field-length-input ${enumTriggerClass}" value="${lengthVal}" placeholder="${isEnumOrSet ? 'Valores...' : 'Long.'}" title="${isEnumOrSet ? 'Haga clic para editar valores' : 'Longitud (ej: 255)'}" ${disabledAttr} ${readonlyAttr}>
         <label class="field-checkbox-label ${pkChecked}" title="Llave Primaria (PK)">
           <input type="checkbox" class="field-pk-checkbox" ${field.isPK ? 'checked' : ''}>
           PK
@@ -654,6 +678,13 @@ export class SidebarEditor {
 
     typeSelect.addEventListener("change", updateCombinedType);
     lengthInput.addEventListener("change", updateCombinedType);
+
+    if (isEnumOrSet) {
+      lengthInput.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._showEnumPopover(lengthInput, tableId, field.id, baseType, lengthInput.value);
+      });
+    }
 
     const pkCheckbox = item.querySelector(".field-pk-checkbox");
     pkCheckbox.addEventListener("change", (e) => {
@@ -900,5 +931,104 @@ export class SidebarEditor {
     }
     html += `</select>`;
     return html;
+  }
+
+  _showEnumPopover(targetEl, tableId, fieldId, baseType, currentValues) {
+    // Remove any existing popover first
+    const existing = document.querySelector(".enum-values-popover");
+    if (existing) existing.remove();
+
+    const popover = document.createElement("div");
+    popover.className = "enum-values-popover";
+
+    // Clean current values for editing (one value per line, no quotes)
+    const cleanList = currentValues
+      ? currentValues.split(',')
+          .map(v => v.trim().replace(/^['"]|['"]$/g, ''))
+          .filter(v => v.length > 0)
+          .join('\n')
+      : "";
+
+    popover.innerHTML = `
+      <div class="enum-popover-header">
+        <span>Opciones del ${baseType}</span>
+        <button class="btn-icon btn-close-popover" style="width: 16px; height: 16px; background: transparent; border: none; cursor: pointer; color: var(--color-text-muted);"><i data-lucide="x" style="width: 10px; height: 10px;"></i></button>
+      </div>
+      <div class="enum-popover-body">
+        <label>Un valor por línea:</label>
+        <textarea class="enum-textarea" placeholder="Ejemplo:\nactivo\ninactivo\npendiente">${cleanList}</textarea>
+      </div>
+      <div class="enum-popover-footer">
+        <button class="btn btn-secondary btn-sm btn-cancel-popover" style="font-size: 11px; padding: 2px 8px; height: 22px;">Cancelar</button>
+        <button class="btn btn-primary btn-sm btn-save-popover" style="font-size: 11px; padding: 2px 8px; height: 22px;">Guardar</button>
+      </div>
+    `;
+
+    document.body.appendChild(popover);
+    if (window.lucide) window.lucide.createIcons();
+
+    // Position the popover next to the target element (the input field in the sidebar)
+    const rect = targetEl.getBoundingClientRect();
+    // Position it to the right of the input (or left if there is no space)
+    let left = rect.right + 8;
+    if (left + 260 > window.innerWidth) {
+      left = rect.left - 268; // place on the left side
+    }
+    
+    // Align top with the input element
+    let top = rect.top - 10;
+    // Bounds check top/bottom
+    if (top + 180 > window.innerHeight) {
+      top = window.innerHeight - 190;
+    }
+    if (top < 10) top = 10;
+
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+
+    // Event listeners
+    const textarea = popover.querySelector(".enum-textarea");
+    textarea.focus();
+
+    const closeBtn = popover.querySelector(".btn-close-popover");
+    const cancelBtn = popover.querySelector(".btn-cancel-popover");
+    const saveBtn = popover.querySelector(".btn-save-popover");
+
+    const close = () => {
+      popover.remove();
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+
+    const handleOutsideClick = (e) => {
+      if (!popover.contains(e.target) && e.target !== targetEl) {
+        close();
+      }
+    };
+
+    closeBtn.addEventListener("click", close);
+    cancelBtn.addEventListener("click", close);
+    
+    saveBtn.addEventListener("click", () => {
+      const rawText = textarea.value;
+      const formattedList = rawText.split(/[\n,]+/)
+        .map(opt => opt.trim())
+        .filter(opt => opt.length > 0)
+        .map(opt => {
+          let clean = opt.replace(/^['"]|['"]$/g, '');
+          return `'${clean}'`;
+        })
+        .join(',');
+
+      // Update input display
+      targetEl.value = formattedList;
+      
+      // Update state
+      const combined = formattedList ? `${baseType}(${formattedList})` : baseType;
+      this.onFieldUpdate(tableId, fieldId, { type: combined });
+      
+      close();
+    });
+
+    document.addEventListener("mousedown", handleOutsideClick);
   }
 }

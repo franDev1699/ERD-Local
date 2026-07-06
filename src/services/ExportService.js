@@ -18,16 +18,31 @@ export class ExportService {
 
     const q = dialect === 'sqlserver' ? (name) => `[${name}]` : (name) => name;
 
-    // Type mapping for SQL Server
+    // Type mapping across dialects
     const mapType = (fieldType, dial) => {
-      if (dial !== 'sqlserver') return fieldType;
       const upper = fieldType.toUpperCase();
-      if (upper === 'TEXT') return 'NVARCHAR(MAX)';
-      if (upper.startsWith('VARCHAR')) return upper.replace('VARCHAR', 'NVARCHAR');
-      if (upper === 'BOOLEAN') return 'BIT';
-      if (upper === 'TIMESTAMP') return 'DATETIME2';
-      if (upper.startsWith('DECIMAL')) return upper;
-      return upper;
+      
+      if (dial === 'sqlserver') {
+        if (upper === 'TEXT') return 'NVARCHAR(MAX)';
+        if (upper.startsWith('VARCHAR')) return upper.replace('VARCHAR', 'NVARCHAR');
+        if (upper === 'BOOLEAN') return 'BIT';
+        if (upper === 'TIMESTAMP') return 'DATETIME2';
+        if (upper.startsWith('DECIMAL')) return upper;
+        if (upper.startsWith('ENUM')) return 'NVARCHAR(255)';
+        return upper;
+      }
+      
+      if (dial === 'postgresql') {
+        if (upper.startsWith('ENUM')) return 'VARCHAR(255)';
+        return upper;
+      }
+      
+      if (dial === 'sqlite') {
+        if (upper.startsWith('ENUM')) return 'TEXT';
+        return upper;
+      }
+      
+      return fieldType;
     };
 
     // 1. Create Tables DDL

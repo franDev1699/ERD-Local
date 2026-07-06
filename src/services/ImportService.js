@@ -343,7 +343,11 @@ export class ImportService {
             const t = elStream.next();
             if (t.type === 'SYMBOL' && t.value === '(') depth++;
             if (t.type === 'SYMBOL' && t.value === ')') depth--;
-            colType += t.value;
+            if (t.type === 'STRING') {
+              colType += `'${t.value}'`;
+            } else {
+              colType += t.value;
+            }
           }
         }
 
@@ -404,10 +408,18 @@ export class ImportService {
                 const t = elStream.next();
                 if (t.type === 'SYMBOL' && t.value === '(') depth++;
                 if (t.type === 'SYMBOL' && t.value === ')') depth--;
-                defaultValue += t.value;
+                if (t.type === 'STRING') {
+                  defaultValue += `'${t.value}'`;
+                } else {
+                  defaultValue += t.value;
+                }
               }
             } else {
-              defaultValue = defValTok.value;
+              if (defValTok.type === 'STRING') {
+                defaultValue = `'${defValTok.value}'`;
+              } else {
+                defaultValue = defValTok.value;
+              }
             }
           }
         } else if (elStream.consume('REFERENCES')) {
