@@ -350,6 +350,17 @@
               <i data-lucide="eye" style="width: 16px; height: 16px;"></i>
             </button>
           </div>
+          <div id="password-requirements" style="font-size: 0.75rem; margin-top: 8px; display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; background: rgba(255,255,255,0.02); border-radius: 6px; border: 1px solid var(--color-border);">
+            <div id="req-length" style="color: var(--color-danger); display: flex; align-items: center; gap: 4px; transition: color 0.2s;">
+              <i data-lucide="x" style="width: 12px; height: 12px;"></i> Mínimo 8 caracteres
+            </div>
+            <div id="req-letter" style="color: var(--color-danger); display: flex; align-items: center; gap: 4px; transition: color 0.2s;">
+              <i data-lucide="x" style="width: 12px; height: 12px;"></i> Mayúscula y minúscula
+            </div>
+            <div id="req-number" style="color: var(--color-danger); display: flex; align-items: center; gap: 4px; transition: color 0.2s;">
+              <i data-lucide="x" style="width: 12px; height: 12px;"></i> Al menos un número
+            </div>
+          </div>
         </div>
         <div class="form-group">
           <span class="color-picker-label">Color de Colaborador</span>
@@ -422,8 +433,57 @@
       });
     });
 
+    let publicRegistrationOpen = true;
+
+    async function checkRegistrationStatus() {
+      try {
+        const res = await fetch('/api/registration-status');
+        const data = await res.json();
+        publicRegistrationOpen = !!data.open;
+        if (!publicRegistrationOpen) {
+          if (toggleContainer) {
+            toggleContainer.innerHTML = '<span style="color: var(--color-text-muted);">El registro público está cerrado.</span>';
+          }
+        }
+      } catch (e) {
+        console.error('Error al consultar estado de registro:', e);
+      }
+    }
+    checkRegistrationStatus();
+
+    // Password requirements validation in real-time
+    const regPasswordInput = document.getElementById('reg-password');
+    const reqLength = document.getElementById('req-length');
+    const reqLetter = document.getElementById('req-letter');
+    const reqNumber = document.getElementById('req-number');
+
+    if (regPasswordInput) {
+      regPasswordInput.addEventListener('input', () => {
+        const val = regPasswordInput.value;
+        updateRequirementUI(reqLength, val.length >= 8, 'Mínimo 8 caracteres');
+        updateRequirementUI(reqLetter, /[a-z]/.test(val) && /[A-Z]/.test(val), 'Mayúscula y minúscula');
+        updateRequirementUI(reqNumber, /[0-9]/.test(val), 'Al menos un número');
+      });
+    }
+
+    function updateRequirementUI(element, valid, text) {
+      if (!element) return;
+      if (valid) {
+        element.style.color = '#10b981';
+        element.innerHTML = `<i data-lucide="check" style="width: 12px; height: 12px;"></i> ${text}`;
+      } else {
+        element.style.color = 'var(--color-danger)';
+        element.innerHTML = `<i data-lucide="x" style="width: 12px; height: 12px;"></i> ${text}`;
+      }
+      if (window.lucide) window.lucide.createIcons();
+    }
+
     // Toggle Modes
     function showRegister() {
+      if (!publicRegistrationOpen) {
+        showError('El registro público está deshabilitado.');
+        return;
+      }
       isRegisterMode = true;
       loginForm.classList.add('hidden');
       registerForm.classList.remove('hidden');
@@ -438,8 +498,12 @@
       registerForm.classList.add('hidden');
       loginForm.classList.remove('hidden');
       subtitleText.textContent = 'Diseño de diagramas colaborativo';
-      toggleContainer.innerHTML = '¿No tienes cuenta? <a class="toggle-link" id="link-to-register">Regístrate aquí</a>';
-      document.getElementById('link-to-register').addEventListener('click', showRegister);
+      if (publicRegistrationOpen) {
+        toggleContainer.innerHTML = '¿No tienes cuenta? <a class="toggle-link" id="link-to-register">Regístrate aquí</a>';
+        document.getElementById('link-to-register').addEventListener('click', showRegister);
+      } else {
+        toggleContainer.innerHTML = '<span style="color: var(--color-text-muted);">El registro público está cerrado.</span>';
+      }
       errorAlert.style.display = 'none';
     }
 

@@ -749,6 +749,20 @@
 					<button id="btn-close-admin-modal" class="btn-icon"><i data-lucide="x"></i></button>
 				</div>
 				<div class="modal-body" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 20px;">
+					<!-- System configuration section -->
+					<div style="background-color: rgba(255, 255, 255, 0.02); border: 1px solid var(--color-border); padding: 15px; border-radius: 8px;">
+						<h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 12px; color: var(--color-text-main);">Configuración del Sistema</h3>
+						<div style="display: flex; justify-content: space-between; align-items: center;">
+							<div>
+								<span style="font-size: 0.88rem; font-weight: 500; color: var(--color-text-main); display: block;">Permitir Registro Público</span>
+								<span style="font-size: 0.78rem; color: var(--color-text-muted);">Permite que cualquier persona cree una cuenta de colaborador desde la pantalla de inicio de sesión.</span>
+							</div>
+							<div class="form-check form-switch" style="padding-left: 2.5em; display: flex; align-items: center;">
+								<input class="form-check-input" type="checkbox" id="admin-settings-allow-register" style="cursor: pointer; width: 40px; height: 20px;" />
+							</div>
+						</div>
+					</div>
+
 					<!-- Add new user section -->
 					<div style="background-color: rgba(255, 255, 255, 0.02); border: 1px solid var(--color-border); padding: 15px; border-radius: 8px;">
 						<h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 12px; color: var(--color-text-main);">Crear Nuevo Usuario</h3>

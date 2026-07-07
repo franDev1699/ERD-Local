@@ -11,7 +11,10 @@ const UserRepository = require('./src/db/UserRepository');
 const SessionRepository = require('./src/db/SessionRepository');
 const ProjectRepository = require('./src/db/ProjectRepository');
 const AiPromptRepository = require('./src/db/AiPromptRepository');
+const SystemSettingsRepository = require('./src/db/SystemSettingsRepository');
 const { hashPassword, verifyPassword } = require('./src/db/auth');
+const rateLimiter = require('./src/security/rateLimiter');
+const { validatePassword } = require('./src/security/passwordValidator');
 
 const PORT = process.env.PORT || 3000;
 const STATE_FILE = path.join(__dirname, 'shared_state.json');
@@ -736,6 +739,15 @@ function cleanJsonResponseText(text) {
   return cleaned.trim();
 }
 
+// Helper to get client IP
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.socket.remoteAddress || '127.0.0.1';
+}
+
 // Helper to parse cookies
 function parseCookies(req) {
   const list = {};
@@ -806,6 +818,14 @@ const server = http.createServer(async (req, res) => {
 
   // 1. PUBLIC AUTH ENDPOINTS
   if (req.method === 'POST' && cleanUrl === '/api/login') {
+    const ip = getClientIp(req);
+    const limit = rateLimiter.checkLogin(ip);
+    if (!limit.allowed) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `Demasiados intentos de inicio de sesión. Por favor intente en ${limit.timeLeft} segundos.` }));
+      return;
+    }
+
     try {
       const { username, password } = await readJsonBody(req);
       if (!username || !password) {
@@ -816,6 +836,7 @@ const server = http.createServer(async (req, res) => {
 
       const user = UserRepository.getUserByUsername(username.trim());
       if (!user) {
+        rateLimiter.recordLoginAttempt(ip);
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Usuario o contraseña incorrectos.' }));
         return;
@@ -823,10 +844,14 @@ const server = http.createServer(async (req, res) => {
 
       const isValid = await verifyPassword(password, user.password_hash, user.password_salt);
       if (!isValid) {
+        rateLimiter.recordLoginAttempt(ip);
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Usuario o contraseña incorrectos.' }));
         return;
       }
+
+      // Success
+      rateLimiter.resetLoginBlocks(ip);
 
       const token = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date();
@@ -851,11 +876,35 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && cleanUrl === '/api/register') {
+    // 1. Check if public registration is allowed
+    if (!SystemSettingsRepository.isPublicRegistrationAllowed()) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'El registro público está deshabilitado por el administrador.' }));
+      return;
+    }
+
+    const ip = getClientIp(req);
+    // 2. Check rate limit
+    const limit = rateLimiter.checkRegister(ip);
+    if (!limit.allowed) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `Has realizado demasiados intentos de registro. Intenta de nuevo en ${limit.timeLeft} segundos.` }));
+      return;
+    }
+
     try {
       const { username, displayName, password, color } = await readJsonBody(req);
       if (!username || !displayName || !password) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Todos los campos son obligatorios.' }));
+        return;
+      }
+
+      // 3. Validate password strength
+      const passwordCheck = validatePassword(password);
+      if (!passwordCheck.valid) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: passwordCheck.errors.join(' ') }));
         return;
       }
 
@@ -865,6 +914,8 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: 'El nombre de usuario ya está en uso.' }));
         return;
       }
+
+      rateLimiter.recordRegisterAttempt(ip);
 
       const { hash, salt } = await hashPassword(password);
       const userId = 'u_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -912,6 +963,13 @@ const server = http.createServer(async (req, res) => {
       'Set-Cookie': `session_token=; HttpOnly; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`
     });
     res.end(JSON.stringify({ success: true }));
+    return;
+  }
+
+  // GET /api/registration-status (Publicly accessible)
+  if (req.method === 'GET' && cleanUrl === '/api/registration-status') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ open: SystemSettingsRepository.isPublicRegistrationAllowed() }));
     return;
   }
 
@@ -1338,6 +1396,13 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
+        const passwordCheck = validatePassword(password);
+        if (!passwordCheck.valid) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: passwordCheck.errors.join(' ') }));
+          return;
+        }
+
         const existing = UserRepository.getUserByUsername(username.trim());
         if (existing) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1392,6 +1457,12 @@ const server = http.createServer(async (req, res) => {
         };
 
         if (password && password.trim().length > 0) {
+          const passwordCheck = validatePassword(password);
+          if (!passwordCheck.valid) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: passwordCheck.errors.join(' ') }));
+            return;
+          }
           const { hash, salt } = await hashPassword(password);
           updateData.password_hash = hash;
           updateData.password_salt = salt;
@@ -1438,22 +1509,64 @@ const server = http.createServer(async (req, res) => {
       }
       return;
     }
+
+    // GET /api/admin/settings
+    if (req.method === 'GET' && cleanUrl === '/api/admin/settings') {
+      if (session.is_admin !== 1) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Acceso denegado. Se requieren permisos de administrador.' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        allow_public_registration: SystemSettingsRepository.isPublicRegistrationAllowed()
+      }));
+      return;
+    }
+
+    // POST /api/admin/settings
+    if (req.method === 'POST' && cleanUrl === '/api/admin/settings') {
+      if (session.is_admin !== 1) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Acceso denegado. Se requieren permisos de administrador.' }));
+        return;
+      }
+      try {
+        const { allow_public_registration } = await readJsonBody(req);
+        if (allow_public_registration !== undefined) {
+          SystemSettingsRepository.setSetting('allow_public_registration', allow_public_registration ? 'true' : 'false');
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
   }
 
   // 4. STATIC PAGES & FILE SERVING
-  // If not logged in, intercept pages and serve login page content
   const isPage = cleanUrl === '/' || cleanUrl === '/index.html';
-  if (isPage && !session) {
-    const loginPath = path.join(__dirname, 'login.html');
-    fs.readFile(loginPath, (err, content) => {
-      if (err) {
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Error interno del servidor al cargar el portal de login.');
-      } else {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(content, 'utf-8');
-      }
-    });
+  const publicPaths = ['/assets/imgs/gnomo-logo.png', '/login.html'];
+  const isPublicAsset = publicPaths.includes(cleanUrl);
+
+  if (!session && !isPublicAsset) {
+    if (isPage) {
+      const loginPath = path.join(__dirname, 'login.html');
+      fs.readFile(loginPath, (err, content) => {
+        if (err) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Error interno del servidor al cargar el portal de login.');
+        } else {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(content, 'utf-8');
+        }
+      });
+    } else {
+      res.writeHead(401, { 'Content-Type': 'text/plain' });
+      res.end('No autorizado. Por favor inicie sesión.');
+    }
     return;
   }
 
@@ -1859,6 +1972,16 @@ const serverHeartbeatInterval = setInterval(() => {
     }
   });
 }, 35000);
+
+// Clean up expired sessions periodically (every 30 minutes)
+const sessionCleanupInterval = setInterval(() => {
+  const deletedCount = SessionRepository.deleteExpiredSessions();
+  if (deletedCount > 0) {
+    console.log(`[Database] Limpieza automática: Se eliminaron ${deletedCount} sesiones expiradas.`);
+  }
+}, 30 * 60 * 1000);
+// Ensure it doesn't block server shutdown
+sessionCleanupInterval.unref();
 
 server.listen(PORT, () => {
   console.log(`\n======================================================`);

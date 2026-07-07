@@ -494,6 +494,44 @@ export class CollabController {
 
     modal.classList.remove('hidden');
 
+    // Load and manage System Settings
+    const allowRegisterCheckbox = document.getElementById('admin-settings-allow-register');
+    if (allowRegisterCheckbox) {
+      try {
+        const settingsRes = await fetch('/api/admin/settings');
+        if (settingsRes.ok) {
+          const settings = await settingsRes.json();
+          allowRegisterCheckbox.checked = !!settings.allow_public_registration;
+        }
+      } catch (err) {
+        console.error('Error al cargar configuraciones del sistema:', err);
+      }
+
+      allowRegisterCheckbox.onchange = async () => {
+        const allow = allowRegisterCheckbox.checked;
+        allowRegisterCheckbox.disabled = true;
+        try {
+          const updateRes = await fetch('/api/admin/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ allow_public_registration: allow })
+          });
+          if (updateRes.ok) {
+            this.uiManager.showToast('Configuración del sistema actualizada.', 'success');
+          } else {
+            const err = await updateRes.json();
+            this.uiManager.showToast(err.error || 'Error al actualizar configuración.', 'error');
+            allowRegisterCheckbox.checked = !allow;
+          }
+        } catch (e) {
+          this.uiManager.showToast('Error de conexión con el servidor.', 'error');
+          allowRegisterCheckbox.checked = !allow;
+        } finally {
+          allowRegisterCheckbox.disabled = false;
+        }
+      };
+    }
+
     const btnClose = document.getElementById('btn-close-admin-modal');
     btnClose.onclick = () => modal.classList.add('hidden');
 
