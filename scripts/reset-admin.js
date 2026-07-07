@@ -10,11 +10,22 @@ async function run() {
 
   try {
     const { hash, salt } = await hashPassword(newPassword);
-    const stmt = db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, is_admin = 1 WHERE username = ?');
-    stmt.run(hash, salt, 'admin');
-    console.log(`¡Contraseña de "admin" restablecida con éxito y privilegios de admin asegurados!`);
+    
+    // Check if the admin user exists
+    const existing = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
+    
+    if (existing) {
+      const stmt = db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, is_admin = 1 WHERE username = ?');
+      stmt.run(hash, salt, 'admin');
+      console.log(`¡Contraseña de "admin" restablecida con éxito y privilegios de admin asegurados!`);
+    } else {
+      const id = 'u_admin_' + Date.now();
+      const stmt = db.prepare('INSERT INTO users (id, username, password_hash, password_salt, display_name, color, is_admin) VALUES (?, ?, ?, ?, ?, ?, 1)');
+      stmt.run(id, 'admin', hash, salt, 'Administrador', '#ef4444');
+      console.log(`¡Usuario "admin" creado con éxito con privilegios de administrador!`);
+    }
   } catch (e) {
-    console.error('Error al restablecer la contraseña:', e.message);
+    console.error('Error al configurar el usuario administrador:', e.message);
   }
   process.exit(0);
 }

@@ -65,11 +65,15 @@ El diseñador incluye un sistema robusto de autenticación, control de accesos y
 
 Si necesitas realizar configuraciones manuales desde la consola del servidor:
 
-*   **Restablecer privilegios y contraseña del usuario `admin`**:
+*   **Crear o restablecer el usuario administrador (`admin`)**:
     ```bash
-    node scripts/reset-admin.js <nueva_contraseña>
+    node scripts/reset-admin.js <contraseña>
     ```
 *   **Crear un nuevo usuario manualmente**:
     ```bash
     node scripts/create-user.js <usuario> "<Nombre Visible>" [color_hex] [admin|true]
+    ```
+*   **Limpiar y restablecer la base de datos completa a su estado de fábrica**:
+    ```bash
+    node scripts/reset-db.js [--force]
     ```

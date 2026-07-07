@@ -36,14 +36,23 @@ class UserRepository {
     }
   }
 
-  static updateUser(id, { display_name, color, is_admin }) {
+  static updateUser(id, { display_name, color, is_admin, password_hash, password_salt }) {
     try {
-      const stmt = db.prepare(`
-        UPDATE users
-        SET display_name = ?, color = ?, is_admin = ?
-        WHERE id = ?
-      `);
-      stmt.run(display_name, color, is_admin ? 1 : 0, id);
+      if (password_hash && password_salt) {
+        const stmt = db.prepare(`
+          UPDATE users
+          SET display_name = ?, color = ?, is_admin = ?, password_hash = ?, password_salt = ?
+          WHERE id = ?
+        `);
+        stmt.run(display_name, color, is_admin ? 1 : 0, password_hash, password_salt, id);
+      } else {
+        const stmt = db.prepare(`
+          UPDATE users
+          SET display_name = ?, color = ?, is_admin = ?
+          WHERE id = ?
+        `);
+        stmt.run(display_name, color, is_admin ? 1 : 0, id);
+      }
       return this.getUserById(id);
     } catch (err) {
       console.error('[UserRepository] Error en updateUser:', err.message);

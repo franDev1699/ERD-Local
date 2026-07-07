@@ -539,13 +539,81 @@ export class CollabController {
               </select>
             </td>
             <td style="padding: 10px; text-align: right; vertical-align: middle;">
-              <button class="btn-admin-delete-user btn-icon" data-userid="${user.id}" style="border: none; background: transparent; color: var(--color-danger); cursor: pointer;"><i data-lucide="trash-2" style="width: 14px; height: 14px;"></i></button>
+              <div style="display: inline-flex; gap: 8px;">
+                <button class="btn-admin-change-password btn-icon" data-userid="${user.id}" data-username="${user.username}" title="Cambiar Contraseña" style="border: none; background: transparent; color: var(--color-warning); cursor: pointer; padding: 2px;"><i data-lucide="key" style="width: 14px; height: 14px;"></i></button>
+                <button class="btn-admin-delete-user btn-icon" data-userid="${user.id}" title="Eliminar Usuario" style="border: none; background: transparent; color: var(--color-danger); cursor: pointer; padding: 2px;"><i data-lucide="trash-2" style="width: 14px; height: 14px;"></i></button>
+              </div>
             </td>
           `;
           usersTable.appendChild(tr);
         });
 
         if (window.lucide) window.lucide.createIcons();
+
+        // Setup change password buttons logic
+        usersTable.querySelectorAll('.btn-admin-change-password').forEach(btn => {
+          btn.onclick = () => {
+            const userId = btn.getAttribute('data-userid');
+            const username = btn.getAttribute('data-username');
+            const userObj = users.find(u => u.id === userId);
+            if (!userObj) return;
+
+            const cpModal = document.getElementById('admin-change-password-modal');
+            const cpTarget = document.getElementById('change-password-target-user');
+            const cpInput = document.getElementById('change-password-input');
+            const cpClose = document.getElementById('btn-close-change-password-modal');
+            const cpCancel = document.getElementById('btn-cancel-change-password');
+            const cpSave = document.getElementById('btn-save-change-password');
+
+            if (!cpModal || !cpTarget || !cpInput) return;
+
+            cpTarget.textContent = `${userObj.display_name} (@${username})`;
+            cpInput.value = '';
+            cpModal.classList.remove('hidden');
+
+            const closeCp = () => {
+              cpModal.classList.add('hidden');
+            };
+
+            cpClose.onclick = closeCp;
+            cpCancel.onclick = closeCp;
+
+            cpSave.onclick = async () => {
+              const newPassword = cpInput.value;
+              if (!newPassword || newPassword.trim().length === 0) {
+                this.uiManager.showToast('La contraseña no puede estar vacía.', 'error');
+                return;
+              }
+
+              cpSave.disabled = true;
+              try {
+                const updateRes = await fetch('/api/admin/update-user', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    userId,
+                    displayName: userObj.display_name,
+                    color: userObj.color,
+                    is_admin: userObj.is_admin === 1,
+                    password: newPassword
+                  })
+                });
+
+                if (updateRes.ok) {
+                  this.uiManager.showToast('Contraseña actualizada con éxito.', 'success');
+                  closeCp();
+                } else {
+                  const err = await updateRes.json();
+                  this.uiManager.showToast(err.error || 'Error al actualizar contraseña.', 'error');
+                }
+              } catch (e) {
+                this.uiManager.showToast('Error de conexión al actualizar contraseña.', 'error');
+              } finally {
+                cpSave.disabled = false;
+              }
+            };
+          };
+        });
 
         usersTable.querySelectorAll('.admin-role-select').forEach(select => {
           select.onchange = async () => {

@@ -1,4 +1,5 @@
 projects/
+data/
 shared_state.json
 shared_state.backup_*.json
 .gemini/

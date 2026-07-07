@@ -22,6 +22,22 @@ if (!fs.existsSync(PROJECTS_DIR)) {
   fs.mkdirSync(PROJECTS_DIR, { recursive: true });
 }
 
+// Ensure assets directory exists and copy the logo if present
+const ASSETS_DIR = path.join(__dirname, 'assets', 'imgs');
+if (!fs.existsSync(ASSETS_DIR)) {
+  fs.mkdirSync(ASSETS_DIR, { recursive: true });
+}
+const logoSrc = path.join(__dirname, 'projects', 'imgs', 'gnomo-logo.png');
+const logoDest = path.join(ASSETS_DIR, 'gnomo-logo.png');
+if (fs.existsSync(logoSrc) && !fs.existsSync(logoDest)) {
+  try {
+    fs.copyFileSync(logoSrc, logoDest);
+    console.log('Logo copiado automáticamente a assets/imgs/gnomo-logo.png');
+  } catch (e) {
+    console.error('Error copiando el logo a assets/imgs:', e.message);
+  }
+}
+
 
 
 // Helper to get safe path for a project file
@@ -1359,7 +1375,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       try {
-        const { userId, displayName, color, is_admin } = await readJsonBody(req);
+        const { userId, displayName, color, is_admin, password } = await readJsonBody(req);
         if (!userId || !displayName) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'userId y displayName son requeridos.' }));
@@ -1369,11 +1385,19 @@ const server = http.createServer(async (req, res) => {
         // Prevent admin from removing their own admin privilege to avoid locking out the system
         const finalIsAdmin = (userId === session.user_id) ? true : is_admin;
 
-        UserRepository.updateUser(userId, {
+        const updateData = {
           display_name: displayName.trim(),
           color,
           is_admin: finalIsAdmin ? 1 : 0
-        });
+        };
+
+        if (password && password.trim().length > 0) {
+          const { hash, salt } = await hashPassword(password);
+          updateData.password_hash = hash;
+          updateData.password_salt = salt;
+        }
+
+        UserRepository.updateUser(userId, updateData);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
