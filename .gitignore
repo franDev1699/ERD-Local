@@ -6,3 +6,6 @@ shared_state.backup_*.json
 SKILLS_CONFIG.md
 test.html
 test_sql.js
+.agents/
+.opencode/
+graphify-out/
