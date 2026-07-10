@@ -491,7 +491,7 @@ export class AiController {
 
         AiService.saveConfig(config);
         this.uiManager.showToast("Configuración de IA guardada.", "success");
-        switchTab("assistant");
+        this.uiManager.closeAiModal(modal);
       });
     }
 
@@ -515,7 +515,7 @@ export class AiController {
             const data = await response.json();
             loadedPrompts = data.prompts;
             this.uiManager.showToast("Prompts del sistema actualizados globalmente.", "success");
-            switchTab("assistant");
+            this.uiManager.closeAiModal(modal);
           } else {
             const errData = await response.json().catch(() => ({}));
             throw new Error(errData.error || 'Error al guardar');
