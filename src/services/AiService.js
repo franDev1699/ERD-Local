@@ -68,7 +68,7 @@ export class AiService {
     }
   }
 
-  static async generate(prompt, currentState = null, mode = 'replace', extraParams = {}) {
+  static async generate(prompt, currentState = null, mode = 'replace', extraParams = {}, onProgress = null) {
     const config = this.loadConfig();
     
     const payload = {
@@ -96,7 +96,46 @@ export class AiService {
       throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
     }
 
-    return await response.json();
+    // Leer la respuesta como flujo SSE (Server-Sent Events) para recibir logs de progreso
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let resultData = null;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // Mantener la última línea incompleta en el buffer
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data: ')) {
+          try {
+            const parsed = JSON.parse(trimmed.substring(6));
+            if (parsed.status === 'progress' && onProgress) {
+              onProgress(parsed.message);
+            } else if (parsed.status === 'success') {
+              resultData = parsed.data;
+            } else if (parsed.status === 'error') {
+              throw new Error(parsed.error);
+            }
+          } catch (e) {
+            if (e.message && (e.message.includes('IA') || e.message.includes('limite') || e.message.includes('longitud'))) {
+              throw e;
+            }
+          }
+        }
+      }
+    }
+
+    if (!resultData) {
+      throw new Error("No se recibieron datos del resultado del diseño de la IA.");
+    }
+
+    return resultData;
   }
 
   static async document(currentState) {
