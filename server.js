@@ -353,6 +353,38 @@ function sendHttpRequest(url, options, body) {
   });
 }
 
+// Helper para mezclar las coordenadas recalculadas por la IA en el estado original del diagrama
+function mergeLayoutResult(originalState, layoutResult) {
+  if (!originalState) return layoutResult;
+  
+  const merged = JSON.parse(JSON.stringify(originalState));
+  
+  if (layoutResult && layoutResult.tables && Array.isArray(layoutResult.tables)) {
+    const layoutTablesMap = new Map();
+    for (const tbl of layoutResult.tables) {
+      if (tbl.id) {
+        layoutTablesMap.set(tbl.id, tbl);
+      }
+    }
+    
+    for (const tbl of merged.tables) {
+      const layoutTbl = layoutTablesMap.get(tbl.id);
+      if (layoutTbl) {
+        if (typeof layoutTbl.x === 'number') tbl.x = layoutTbl.x;
+        if (typeof layoutTbl.y === 'number') tbl.y = layoutTbl.y;
+        if (layoutTbl.groupId !== undefined) tbl.groupId = layoutTbl.groupId;
+        if (layoutTbl.color !== undefined) tbl.color = layoutTbl.color;
+      }
+    }
+  }
+  
+  if (layoutResult && layoutResult.groups && Array.isArray(layoutResult.groups)) {
+    merged.groups = layoutResult.groups;
+  }
+  
+  return merged;
+}
+
 // Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa con soporte para auto-continuar respuestas truncadas
 async function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds, userId, enableThinking }) {
   let promptTemplate = '';
@@ -362,7 +394,29 @@ async function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentS
   } else if (mode === 'edit') {
     promptTemplate = prompts.mode_edit;
   } else if (mode === 'layout') {
-    promptTemplate = prompts.mode_layout;
+    promptTemplate = `Eres un diseñador de bases de datos experto. El usuario desea REORGANIZAR las posiciones y dimensiones de las tablas y grupos del diagrama para mejorar su legibilidad y estética.
+NO agregues, modifiques ni elimines ninguna tabla, campo, tipo ni relación. Solo debes ajustar las coordenadas (x, y) de las tablas y de los grupos, y las dimensiones (width, height) de los grupos.
+Agrupa físicamente cerca las tablas relacionadas, manteniendo un excelente espacio libre entre ellas.
+
+Para ahorrar tokens y velocidad, tu respuesta JSON DEBE ser compacta y contener únicamente las coordenadas (x, y) de las tablas y grupos, y dimensiones (width, height) de los grupos. NO devuelvas los campos ('fields') de las tablas ni las relaciones ('relationships').
+Esquema JSON de respuesta esperado:
+{
+  "tables": [
+    { "id": "string", "x": número, "y": número, "groupId": "string o null" }
+  ],
+  "groups": [
+    { "id": "string", "name": "string", "color": "string", "x": número, "y": número, "width": número, "height": número }
+  ]
+}
+
+Reglas importantes:
+1. El JSON debe ser 100% válido y parseable directamente. No agregues \`\`\`json ni bloques de código.
+2. No cambies nombres de tablas ni de grupos.
+3. Organiza todas las coordenadas y dimensiones del diagrama siguiendo al pie de la letra estas directrices:
+{layoutRulesText}
+importante: no use el pensamiento, ni pensamiento extendido.
+Estado actual del diagrama:
+{currentState}`;
   } else if (mode === 'query_generate') {
     promptTemplate = prompts.mode_query_generate;
   } else if (mode === 'query_suggest') {
@@ -1610,9 +1664,16 @@ const server = http.createServer(async (req, res) => {
         }
 
         params.userId = session.user_id; // Inyectar id del usuario
+        const originalState = params.currentState;
         const aiResult = await makeAiRequest(params);
+
+        let finalResult = aiResult;
+        if (params.mode === 'layout' && originalState) {
+          finalResult = mergeLayoutResult(originalState, aiResult);
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(aiResult));
+        res.end(JSON.stringify(finalResult));
       } catch (err) {
         console.error('Error en Proxy de IA:', err.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
