@@ -334,401 +334,423 @@ class ContextBuilder {
   }
 }
 
-// Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa
-function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds, userId, enableThinking }) {
+// Helper para hacer peticiones HTTP asíncronas con soporte para HTTP y HTTPS
+function sendHttpRequest(url, options, body) {
   return new Promise((resolve, reject) => {
-    let promptTemplate = '';
-    const prompts = AiPromptRepository.getPromptsForUser(userId);
-    if (mode === 'append') {
-      promptTemplate = prompts.mode_append;
-    } else if (mode === 'edit') {
-      promptTemplate = prompts.mode_edit;
-    } else if (mode === 'layout') {
-      promptTemplate = prompts.mode_layout;
-    } else if (mode === 'query_generate') {
-      promptTemplate = prompts.mode_query_generate;
-    } else if (mode === 'query_suggest') {
-      promptTemplate = prompts.mode_query_suggest;
-    } else if (mode === 'query_explain') {
-      promptTemplate = prompts.mode_query_explain;
-    } else {
-      promptTemplate = prompts.mode_create;
-    }
-
-    const optimizedContext = ContextBuilder.build({
-      currentState,
-      prompt,
-      mode,
-      contextDepth,
-      currentQuerySql,
-      selectedTableIds
+    const clientModule = url.startsWith('https') ? https : http;
+    const req = clientModule.request(url, options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        resolve({ statusCode: res.statusCode, headers: res.headers, data });
+      });
     });
-
-    let catalogInstruction = "";
-    if (optimizedContext.catalog && optimizedContext.catalog.length > 0) {
-      catalogInstruction = `\n\nOTRAS TABLAS EXISTENTES EN EL DIAGRAMA (Catálogo de referencia rápida. NO las modifiques ni agregues campos en ellas a menos que se te pida explícitamente):\n- ${optimizedContext.catalog.join('\n- ')}\n`;
-      delete optimizedContext.catalog;
+    req.on('error', (e) => reject(e));
+    if (body) {
+      req.write(body);
     }
-
-    const stateStr = JSON.stringify(optimizedContext);
-    const currentQuerySqlStr = currentQuerySql ? `\nConsulta SQL actual a modificar:\n${currentQuerySql}` : '';
-
-    let systemInstruction = (promptTemplate || '')
-      .replace(/{expectedSchemaText}/g, prompts.expectedSchemaText || '')
-      .replace(/{layoutRulesText}/g, prompts.layoutRulesText || '')
-      .replace(/{currentState}/g, stateStr)
-      .replace(/{engine}/g, engine || 'PostgreSQL')
-      .replace(/{currentQuerySql}/g, currentQuerySqlStr);
-
-    if (catalogInstruction) {
-      systemInstruction += catalogInstruction;
-    }
-
-    let options = {};
-    let clientModule = https;
-
-    if (provider === 'gemini') {
-      const geminiModel = model || 'gemini-1.5-flash';
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
-      
-      requestBody = JSON.stringify({
-        contents: [{
-          parts: [{
-            text: `Requerimiento del usuario: ${prompt}\n\nInstrucción del sistema: ${systemInstruction}`
-          }]
-        }],
-        generationConfig: {
-          responseMimeType: "application/json"
-        }
-      });
-
-      options = {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      };
-
-      const req = https.request(url, options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
-              return reject(new Error(parsed.error.message || 'Error en la API de Gemini'));
-            }
-            const textResponse = parsed.candidates[0].content.parts[0].text;
-            resolve(JSON.parse(cleanJsonResponseText(textResponse)));
-          } catch (e) {
-            reject(new Error('La respuesta de Gemini no se pudo procesar como JSON: ' + e.message + '\nData recibida: ' + data));
-          }
-        });
-      });
-
-      req.on('error', (e) => reject(e));
-      req.write(requestBody);
-      req.end();
-
-    } else if (['openai', 'vllm', 'litellm', 'custom-openai'].includes(provider)) {
-      const modelName = model || (provider === 'openai' ? 'gpt-4o-mini' : '');
-      let requestUrl = '';
-      
-      if (provider === 'openai') {
-        requestUrl = 'https://api.openai.com/v1/chat/completions';
-      } else {
-        let base = apiUrl || '';
-        base = base.trim();
-        if (base.endsWith('/')) {
-          base = base.slice(0, -1);
-        }
-        if (base.endsWith('/chat/completions')) {
-          requestUrl = base;
-        } else if (base.endsWith('/v1')) {
-          requestUrl = `${base}/chat/completions`;
-        } else if (base.includes('/v1')) {
-          requestUrl = `${base}/chat/completions`;
-        } else {
-          requestUrl = `${base}/v1/chat/completions`;
-        }
-      }
-
-      clientModule = requestUrl.startsWith('https') ? https : http;
-
-      const requestPayload = {
-        model: modelName,
-        messages: [
-          { role: 'system', content: systemInstruction },
-          { role: 'user', content: prompt }
-        ]
-      };
-
-      requestPayload.chat_template_kwargs = { enable_thinking: !!enableThinking };
-      if (enableThinking) {
-        requestPayload.max_tokens = 8192;
-      }
-
-      if (provider === 'openai') {
-        requestPayload.response_format = { type: "json_object" };
-      }
-
-      requestBody = JSON.stringify(requestPayload);
-
-      options = {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      };
-
-      if (apiKey) {
-        options.headers['Authorization'] = `Bearer ${apiKey}`;
-      }
-
-      const req = clientModule.request(requestUrl, options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
-              const errMsg = parsed.error.message || (typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error));
-              return reject(new Error(errMsg || 'Error en el proveedor compatible con OpenAI'));
-            }
-            if (!parsed.choices || parsed.choices.length === 0 || !parsed.choices[0].message) {
-              return reject(new Error('Respuesta inválida del proveedor compatible con OpenAI. Data: ' + data));
-            }
-            const textResponse = parsed.choices[0].message.content;
-            resolve(JSON.parse(cleanJsonResponseText(textResponse)));
-          } catch (e) {
-            reject(new Error('La respuesta del proveedor de IA no se pudo procesar como JSON: ' + e.message + '\nData: ' + data));
-          }
-        });
-      });
-
-      req.on('error', (e) => reject(new Error(`No se pudo conectar con el servidor de IA (${requestUrl}): ${e.message}`)));
-      req.write(requestBody);
-      req.end();
-
-    } else if (provider === 'ollama') {
-      const ollamaUrl = apiUrl || 'http://localhost:11434';
-      const url = `${ollamaUrl}/api/chat`;
-      clientModule = ollamaUrl.startsWith('https') ? https : http;
-
-      requestBody = JSON.stringify({
-        model: model || 'llama3',
-        messages: [
-          { role: 'system', content: systemInstruction },
-          { role: 'user', content: prompt }
-        ],
-        stream: false,
-        format: 'json'
-      });
-
-      options = {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      };
-
-      if (apiKey) {
-        options.headers['Authorization'] = `Bearer ${apiKey}`;
-      }
-
-      const req = clientModule.request(url, options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
-              return reject(new Error(parsed.error || 'Error en la API de Ollama'));
-            }
-            const textResponse = parsed.message.content;
-            resolve(JSON.parse(cleanJsonResponseText(textResponse)));
-          } catch (e) {
-            reject(new Error('La respuesta de Ollama no se pudo procesar como JSON: ' + e.message + '\nData: ' + data));
-          }
-        });
-      });
-
-      req.on('error', (e) => reject(new Error(`Ollama no está corriendo o la URL es inaccesible: ${e.message}`)));
-      req.write(requestBody);
-      req.end();
-    } else {
-      reject(new Error('Proveedor de IA no soportado.'));
-    }
+    req.end();
   });
 }
 
-// Helper para solicitar la documentación detallada en Markdown a la IA
-function makeAiDocRequest({ provider, apiKey, apiUrl, model, currentState, userId }) {
-  return new Promise((resolve, reject) => {
-    const prompts = AiPromptRepository.getPromptsForUser(userId);
-    const stateStr = JSON.stringify(currentState || { tables: [], relationships: [] }, null, 2);
-    const prompt = (prompts.prompt_document || '').replace(/{currentState}/g, stateStr);
+// Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa con soporte para auto-continuar respuestas truncadas
+async function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds, userId, enableThinking }) {
+  let promptTemplate = '';
+  const prompts = AiPromptRepository.getPromptsForUser(userId);
+  if (mode === 'append') {
+    promptTemplate = prompts.mode_append;
+  } else if (mode === 'edit') {
+    promptTemplate = prompts.mode_edit;
+  } else if (mode === 'layout') {
+    promptTemplate = prompts.mode_layout;
+  } else if (mode === 'query_generate') {
+    promptTemplate = prompts.mode_query_generate;
+  } else if (mode === 'query_suggest') {
+    promptTemplate = prompts.mode_query_suggest;
+  } else if (mode === 'query_explain') {
+    promptTemplate = prompts.mode_query_explain;
+  } else {
+    promptTemplate = prompts.mode_create;
+  }
 
-    let requestBody = '';
-    let options = {};
-    let clientModule = https;
-
-    if (provider === 'gemini') {
-      const geminiModel = model || 'gemini-1.5-flash';
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
-      
-      requestBody = JSON.stringify({
-        contents: [{
-          parts: [{
-            text: prompt
-          }]
-        }]
-      });
-
-      options = {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      };
-
-      const req = https.request(url, options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
-              return reject(new Error(parsed.error.message || 'Error en la API de Gemini'));
-            }
-            const textResponse = parsed.candidates[0].content.parts[0].text;
-            resolve(textResponse);
-          } catch (e) {
-            reject(new Error('La respuesta de Gemini no se pudo procesar: ' + e.message));
-          }
-        });
-      });
-
-      req.on('error', (e) => reject(e));
-      req.write(requestBody);
-      req.end();
-
-    } else if (['openai', 'vllm', 'litellm', 'custom-openai'].includes(provider)) {
-      const modelName = model || (provider === 'openai' ? 'gpt-4o-mini' : '');
-      let requestUrl = '';
-      
-      if (provider === 'openai') {
-        requestUrl = 'https://api.openai.com/v1/chat/completions';
-      } else {
-        let base = apiUrl || '';
-        base = base.trim();
-        if (base.endsWith('/')) {
-          base = base.slice(0, -1);
-        }
-        if (base.endsWith('/chat/completions')) {
-          requestUrl = base;
-        } else if (base.endsWith('/v1')) {
-          requestUrl = `${base}/chat/completions`;
-        } else if (base.includes('/v1')) {
-          requestUrl = `${base}/chat/completions`;
-        } else {
-          requestUrl = `${base}/v1/chat/completions`;
-        }
-      }
-
-      clientModule = requestUrl.startsWith('https') ? https : http;
-
-      requestBody = JSON.stringify({
-        model: modelName,
-        messages: [
-          { role: 'user', content: prompt }
-        ]
-      });
-
-      options = {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      };
-
-      if (apiKey) {
-        options.headers['Authorization'] = `Bearer ${apiKey}`;
-      }
-
-      const req = clientModule.request(requestUrl, options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
-              const errMsg = parsed.error.message || (typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error));
-              return reject(new Error(errMsg || 'Error en el proveedor compatible con OpenAI'));
-            }
-            if (!parsed.choices || parsed.choices.length === 0 || !parsed.choices[0].message) {
-              return reject(new Error('Respuesta inválida del proveedor compatible con OpenAI. Data: ' + data));
-            }
-            const textResponse = parsed.choices[0].message.content;
-            resolve(textResponse);
-          } catch (e) {
-            reject(new Error('La respuesta del proveedor de IA no se pudo procesar: ' + e.message + '\nData: ' + data));
-          }
-        });
-      });
-
-      req.on('error', (e) => reject(new Error(`No se pudo conectar con el servidor de IA (${requestUrl}): ${e.message}`)));
-      req.write(requestBody);
-      req.end();
-
-    } else if (provider === 'ollama') {
-      const ollamaUrl = apiUrl || 'http://localhost:11434';
-      const url = `${ollamaUrl}/api/chat`;
-      clientModule = ollamaUrl.startsWith('https') ? https : http;
-
-      requestBody = JSON.stringify({
-        model: model || 'llama3',
-        messages: [
-          { role: 'user', content: prompt }
-        ],
-        stream: false
-      });
-
-      options = {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      };
-
-      if (apiKey) {
-        options.headers['Authorization'] = `Bearer ${apiKey}`;
-      }
-
-      const req = clientModule.request(url, options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
-              return reject(new Error(parsed.error || 'Error en la API de Ollama'));
-            }
-            const textResponse = parsed.message.content;
-            resolve(textResponse);
-          } catch (e) {
-            reject(new Error('La respuesta de Ollama no se pudo procesar: ' + e.message));
-          }
-        });
-      });
-
-      req.on('error', (e) => reject(new Error(`Ollama no está corriendo o la URL es inaccesible: ${e.message}`)));
-      req.write(requestBody);
-      req.end();
-    } else {
-      reject(new Error('Proveedor de IA no soportado.'));
-    }
+  const optimizedContext = ContextBuilder.build({
+    currentState,
+    prompt,
+    mode,
+    contextDepth,
+    currentQuerySql,
+    selectedTableIds
   });
+
+  let catalogInstruction = "";
+  if (optimizedContext.catalog && optimizedContext.catalog.length > 0) {
+    catalogInstruction = `\n\nOTRAS TABLAS EXISTENTES EN EL DIAGRAMA (Catálogo de referencia rápida. NO las modifiques ni agregues campos en ellas a menos que se te pida explícitamente):\n- ${optimizedContext.catalog.join('\n- ')}\n`;
+    delete optimizedContext.catalog;
+  }
+
+  const stateStr = JSON.stringify(optimizedContext);
+  const currentQuerySqlStr = currentQuerySql ? `\nConsulta SQL actual a modificar:\n${currentQuerySql}` : '';
+
+  let systemInstruction = (promptTemplate || '')
+    .replace(/{expectedSchemaText}/g, prompts.expectedSchemaText || '')
+    .replace(/{layoutRulesText}/g, prompts.layoutRulesText || '')
+    .replace(/{currentState}/g, stateStr)
+    .replace(/{engine}/g, engine || 'PostgreSQL')
+    .replace(/{currentQuerySql}/g, currentQuerySqlStr);
+
+  if (catalogInstruction) {
+    systemInstruction += catalogInstruction;
+  }
+
+  if (provider === 'gemini') {
+    const geminiModel = model || 'gemini-1.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
+    
+    const requestBody = JSON.stringify({
+      contents: [{
+        parts: [{
+          text: `Requerimiento del usuario: ${prompt}\n\nInstrucción del sistema: ${systemInstruction}`
+        }]
+      }],
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
+    });
+
+    const options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    };
+
+    try {
+      const res = await sendHttpRequest(url, options, requestBody);
+      const parsed = JSON.parse(res.data);
+      if (parsed.error) {
+        throw new Error(parsed.error.message || 'Error en la API de Gemini');
+      }
+      const textResponse = parsed.candidates[0].content.parts[0].text;
+      return JSON.parse(cleanJsonResponseText(textResponse));
+    } catch (e) {
+      throw new Error('La respuesta de Gemini no se pudo procesar como JSON: ' + e.message);
+    }
+
+  } else if (['openai', 'vllm', 'litellm', 'custom-openai'].includes(provider)) {
+    const modelName = model || (provider === 'openai' ? 'gpt-4o-mini' : '');
+    let requestUrl = '';
+    
+    if (provider === 'openai') {
+      requestUrl = 'https://api.openai.com/v1/chat/completions';
+    } else {
+      let base = apiUrl || '';
+      base = base.trim();
+      if (base.endsWith('/')) {
+        base = base.slice(0, -1);
+      }
+      if (base.endsWith('/chat/completions')) {
+        requestUrl = base;
+      } else if (base.endsWith('/v1')) {
+        requestUrl = `${base}/chat/completions`;
+      } else if (base.includes('/v1')) {
+        requestUrl = `${base}/chat/completions`;
+      } else {
+        requestUrl = `${base}/v1/chat/completions`;
+      }
+    }
+
+    const options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    };
+
+    if (apiKey) {
+      options.headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+
+    let textResponse = '';
+    let finishReason = 'length';
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    const messages = [
+      { role: 'system', content: systemInstruction },
+      { role: 'user', content: prompt }
+    ];
+
+    let partContent = '';
+
+    while (finishReason === 'length' && attempts < maxAttempts) {
+      attempts++;
+      
+      if (attempts > 1) {
+        console.log(`[makeAiRequest] La respuesta se truncó (intento ${attempts - 1}). Solicitando continuación...`);
+        messages.push({ role: 'assistant', content: partContent });
+        messages.push({
+          role: 'user',
+          content: 'Tu respuesta anterior se interrumpió por el límite de espacio. Continúa imprimiendo el JSON EXACTAMENTE desde donde te quedaste (sin repetir nada anterior, sin envolverlo en bloques markdown y sin explicaciones adicionales). Solo escribe la continuación.'
+        });
+      }
+
+      const requestPayload = {
+        model: modelName,
+        messages: messages,
+        max_tokens: 8192
+      };
+
+      if (attempts === 1) {
+        requestPayload.chat_template_kwargs = { enable_thinking: !!enableThinking };
+        if (provider === 'openai') {
+          requestPayload.response_format = { type: "json_object" };
+        }
+      }
+
+      let res;
+      try {
+        res = await sendHttpRequest(requestUrl, options, JSON.stringify(requestPayload));
+      } catch (err) {
+        throw new Error(`No se pudo conectar con el servidor de IA (${requestUrl}): ${err.message}`);
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(res.data);
+      } catch (err) {
+        throw new Error(`La respuesta del servidor de IA no es un JSON válido. Status: ${res.statusCode}. Error: ${err.message}`);
+      }
+
+      if (parsed.error) {
+        const errMsg = parsed.error.message || (typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error));
+        throw new Error(errMsg || 'Error en el proveedor compatible con OpenAI');
+      }
+
+      if (!parsed.choices || parsed.choices.length === 0 || !parsed.choices[0].message) {
+        throw new Error('Respuesta inválida del proveedor compatible con OpenAI.');
+      }
+
+      partContent = parsed.choices[0].message.content || '';
+      textResponse += partContent;
+      finishReason = parsed.choices[0].finish_reason;
+    }
+
+    try {
+      return JSON.parse(cleanJsonResponseText(textResponse));
+    } catch (parseErr) {
+      if (finishReason === 'length') {
+        throw new Error('La respuesta de la IA se interrumpió por límite de longitud (finish_reason: length) y no se pudo procesar como JSON después de varios intentos de continuación.');
+      }
+      throw new Error('La respuesta del proveedor de IA no se pudo procesar como JSON: ' + parseErr.message + '\nRespuesta acumulada: ' + textResponse);
+    }
+
+  } else if (provider === 'ollama') {
+    const ollamaUrl = apiUrl || 'http://localhost:11434';
+    const url = `${ollamaUrl}/api/chat`;
+
+    const requestBody = JSON.stringify({
+      model: model || 'llama3',
+      messages: [
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: prompt }
+      ],
+      stream: false,
+      format: 'json'
+    });
+
+    const options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    };
+
+    if (apiKey) {
+      options.headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+
+    try {
+      const res = await sendHttpRequest(url, options, requestBody);
+      const parsed = JSON.parse(res.data);
+      if (parsed.error) {
+        throw new Error(parsed.error || 'Error en la API de Ollama');
+      }
+      const textResponse = parsed.message.content;
+      return JSON.parse(cleanJsonResponseText(textResponse));
+    } catch (e) {
+      throw new Error('La respuesta de Ollama no se pudo procesar como JSON: ' + e.message);
+    }
+  } else {
+    throw new Error('Proveedor de IA no soportado.');
+  }
+}
+
+// Helper para solicitar la documentación detallada en Markdown a la IA con soporte para auto-continuar respuestas truncadas
+async function makeAiDocRequest({ provider, apiKey, apiUrl, model, currentState, userId, enableThinking }) {
+  const prompts = AiPromptRepository.getPromptsForUser(userId);
+  const stateStr = JSON.stringify(currentState || { tables: [], relationships: [] }, null, 2);
+  const prompt = (prompts.prompt_document || '').replace(/{currentState}/g, stateStr);
+
+  if (provider === 'gemini') {
+    const geminiModel = model || 'gemini-1.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
+    
+    const requestBody = JSON.stringify({
+      contents: [{
+        parts: [{
+          text: prompt
+        }]
+      }]
+    });
+
+    const options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    };
+
+    try {
+      const res = await sendHttpRequest(url, options, requestBody);
+      const parsed = JSON.parse(res.data);
+      if (parsed.error) {
+        throw new Error(parsed.error.message || 'Error en la API de Gemini');
+      }
+      return parsed.candidates[0].content.parts[0].text;
+    } catch (e) {
+      throw new Error('La respuesta de Gemini no se pudo procesar: ' + e.message);
+    }
+
+  } else if (['openai', 'vllm', 'litellm', 'custom-openai'].includes(provider)) {
+    const modelName = model || (provider === 'openai' ? 'gpt-4o-mini' : '');
+    let requestUrl = '';
+    
+    if (provider === 'openai') {
+      requestUrl = 'https://api.openai.com/v1/chat/completions';
+    } else {
+      let base = apiUrl || '';
+      base = base.trim();
+      if (base.endsWith('/')) {
+        base = base.slice(0, -1);
+      }
+      if (base.endsWith('/chat/completions')) {
+        requestUrl = base;
+      } else if (base.endsWith('/v1')) {
+        requestUrl = `${base}/chat/completions`;
+      } else if (base.includes('/v1')) {
+        requestUrl = `${base}/chat/completions`;
+      } else {
+        requestUrl = `${base}/v1/chat/completions`;
+      }
+    }
+
+    const options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    };
+
+    if (apiKey) {
+      options.headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+
+    let textResponse = '';
+    let finishReason = 'length';
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    const messages = [
+      { role: 'user', content: prompt }
+    ];
+
+    let partContent = '';
+
+    while (finishReason === 'length' && attempts < maxAttempts) {
+      attempts++;
+
+      if (attempts > 1) {
+        console.log(`[makeAiDocRequest] La documentación se truncó (intento ${attempts - 1}). Solicitando continuación...`);
+        messages.push({ role: 'assistant', content: partContent });
+        messages.push({
+          role: 'user',
+          content: 'Tu respuesta anterior se interrumpió por el límite de espacio. Continúa imprimiendo el texto EXACTAMENTE desde donde te quedaste (sin repetir nada anterior y sin introducciones). Solo escribe la continuación.'
+        });
+      }
+
+      const requestPayload = {
+        model: modelName,
+        messages: messages,
+        max_tokens: 8192
+      };
+      requestPayload.chat_template_kwargs = { enable_thinking: !!enableThinking };
+
+      let res;
+      try {
+        res = await sendHttpRequest(requestUrl, options, JSON.stringify(requestPayload));
+      } catch (err) {
+        throw new Error(`No se pudo conectar con el servidor de IA (${requestUrl}): ${err.message}`);
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(res.data);
+      } catch (err) {
+        throw new Error(`La respuesta del servidor de IA no es un JSON válido. Status: ${res.statusCode}. Error: ${err.message}`);
+      }
+
+      if (parsed.error) {
+        const errMsg = parsed.error.message || (typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error));
+        throw new Error(errMsg || 'Error en el proveedor compatible con OpenAI');
+      }
+
+      if (!parsed.choices || parsed.choices.length === 0 || !parsed.choices[0].message) {
+        throw new Error('Respuesta inválida del proveedor compatible con OpenAI.');
+      }
+
+      partContent = parsed.choices[0].message.content || '';
+      textResponse += partContent;
+      finishReason = parsed.choices[0].finish_reason;
+    }
+
+    return textResponse;
+
+  } else if (provider === 'ollama') {
+    const ollamaUrl = apiUrl || 'http://localhost:11434';
+    const url = `${ollamaUrl}/api/chat`;
+
+    const requestBody = JSON.stringify({
+      model: model || 'llama3',
+      messages: [
+        { role: 'user', content: prompt }
+      ],
+      stream: false
+    });
+
+    const options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    };
+
+    if (apiKey) {
+      options.headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+
+    try {
+      const res = await sendHttpRequest(url, options, requestBody);
+      const parsed = JSON.parse(res.data);
+      if (parsed.error) {
+        throw new Error(parsed.error || 'Error en la API de Ollama');
+      }
+      return parsed.message.content;
+    } catch (e) {
+      throw new Error('La respuesta de Ollama no se pudo procesar: ' + e.message);
+    }
+  } else {
+    throw new Error('Proveedor de IA no soportado.');
+  }
 }
 
 // Obtener la lista de modelos disponibles para un proveedor de IA de forma nativa
