@@ -53,6 +53,7 @@ export class AiController {
     const inputApiKey = document.getElementById("ai-apikey");
     const inputApiUrl = document.getElementById("ai-apiurl");
     const btnSaveConfig = document.getElementById("btn-save-ai-config");
+    const checkboxThinking = document.getElementById("ai-enable-thinking");
 
     // Assistant Fields
     const textareaPrompt = document.getElementById("ai-prompt");
@@ -229,7 +230,8 @@ export class AiController {
           provider: selectProvider ? selectProvider.value : 'gemini',
           model: inputModel ? inputModel.value.trim() : '',
           apiKey: inputApiKey ? inputApiKey.value.trim() : '',
-          apiUrl: inputApiUrl ? inputApiUrl.value.trim() : ''
+          apiUrl: inputApiUrl ? inputApiUrl.value.trim() : '',
+          enableThinking: checkboxThinking ? checkboxThinking.checked : false
         };
 
         const requiresApiKey = ['gemini', 'openai'].includes(config.provider);
@@ -279,6 +281,7 @@ export class AiController {
       if (inputModel) inputModel.value = config.model;
       if (inputApiKey) inputApiKey.value = config.apiKey;
       if (inputApiUrl) inputApiUrl.value = config.apiUrl;
+      if (checkboxThinking) checkboxThinking.checked = !!config.enableThinking;
 
       if (testConnectionStatus) {
         testConnectionStatus.innerHTML = `<span style="font-style: italic;">Sin verificar</span>`;
@@ -672,7 +675,8 @@ export class AiController {
           provider: selectProvider.value,
           model: inputModel.value.trim(),
           apiKey: inputApiKey.value.trim(),
-          apiUrl: inputApiUrl.value.trim()
+          apiUrl: inputApiUrl.value.trim(),
+          enableThinking: checkboxThinking ? checkboxThinking.checked : false
         };
 
         const requiresApiKey = ['gemini', 'openai'].includes(config.provider);

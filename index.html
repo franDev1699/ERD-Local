@@ -521,8 +521,13 @@
 							</div>
 
 							<div id="ai-apiurl-group" class="hidden">
-								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">URL de Ollama:</label>
+								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">URL del Servidor:</label>
 								<input type="text" id="ai-apiurl" value="http://localhost:11434" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main);" />
+							</div>
+
+							<div style="display: flex; align-items: center; gap: 8px; margin-top: 10px; margin-bottom: 5px;">
+								<input type="checkbox" id="ai-enable-thinking" style="cursor: pointer; width: 16px; height: 16px;" />
+								<label for="ai-enable-thinking" style="font-size: 0.85rem; color: var(--color-text-muted); cursor: pointer; user-select: none;">Activar razonamiento (Thinking)</label>
 							</div>
 
 							<!-- Connection test section -->

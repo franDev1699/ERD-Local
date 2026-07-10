@@ -335,7 +335,7 @@ class ContextBuilder {
 }
 
 // Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa
-function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds, userId }) {
+function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds, userId, enableThinking }) {
   return new Promise((resolve, reject) => {
     let promptTemplate = '';
     const prompts = AiPromptRepository.getPromptsForUser(userId);
@@ -462,6 +462,11 @@ function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, 
           { role: 'user', content: prompt }
         ]
       };
+
+      if (enableThinking) {
+        requestPayload.chat_template_kwargs = { enable_thinking: true };
+        requestPayload.max_tokens = 8192;
+      }
 
       if (provider === 'openai') {
         requestPayload.response_format = { type: "json_object" };
@@ -917,7 +922,8 @@ function resolveAiParams(userId, clientParams) {
     provider: clientParams.provider || (savedConfig ? savedConfig.provider : ''),
     model: clientParams.model || (savedConfig ? savedConfig.model : ''),
     apiUrl: clientParams.apiUrl || (savedConfig ? savedConfig.api_url : ''),
-    apiKey: clientParams.apiKey || ''
+    apiKey: clientParams.apiKey || '',
+    enableThinking: clientParams.enableThinking !== undefined ? clientParams.enableThinking : (savedConfig ? !!savedConfig.enable_thinking : false)
   };
 
   if (resolved.apiKey === '••••••••' || resolved.apiKey === '') {
@@ -1527,7 +1533,8 @@ const server = http.createServer(async (req, res) => {
           provider: savedConfig.provider,
           model: savedConfig.model,
           apiKey: savedConfig.api_key ? '••••••••' : '',
-          apiUrl: savedConfig.api_url
+          apiUrl: savedConfig.api_url,
+          enableThinking: !!savedConfig.enable_thinking
         }));
       } else {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1535,7 +1542,8 @@ const server = http.createServer(async (req, res) => {
           provider: 'gemini',
           model: 'gemini-1.5-flash',
           apiKey: '',
-          apiUrl: ''
+          apiUrl: '',
+          enableThinking: false
         }));
       }
       return;

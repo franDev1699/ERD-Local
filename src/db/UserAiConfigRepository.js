@@ -13,7 +13,7 @@ class UserAiConfigRepository {
     }
   }
 
-  static saveUserConfig(userId, { provider, model, apiKey, apiUrl }) {
+  static saveUserConfig(userId, { provider, model, apiKey, apiUrl, enableThinking }) {
     try {
       const existing = this.getUserConfig(userId);
       let finalApiKey = apiKey || '';
@@ -26,16 +26,17 @@ class UserAiConfigRepository {
       }
 
       const stmt = db.prepare(`
-        INSERT INTO user_ai_configs (user_id, provider, model, api_key, api_url)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO user_ai_configs (user_id, provider, model, api_key, api_url, enable_thinking)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
           provider = excluded.provider,
           model = excluded.model,
           api_key = excluded.api_key,
           api_url = excluded.api_url,
+          enable_thinking = excluded.enable_thinking,
           updated_at = datetime('now')
       `);
-      stmt.run(userId, provider, model || null, finalApiKey, apiUrl || null);
+      stmt.run(userId, provider, model || null, finalApiKey, apiUrl || null, enableThinking ? 1 : 0);
       return true;
     } catch (err) {
       console.error('[UserAiConfigRepository] Error en saveUserConfig:', err.message);

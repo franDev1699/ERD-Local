@@ -8,7 +8,8 @@ export class AiService {
       provider: 'gemini',
       model: 'gemini-1.5-flash',
       apiKey: '',
-      apiUrl: 'http://localhost:11434'
+      apiUrl: 'http://localhost:11434',
+      enableThinking: false
     };
   }
 
@@ -75,6 +76,7 @@ export class AiService {
       apiKey: config.apiKey,
       apiUrl: config.apiUrl,
       model: config.model,
+      enableThinking: !!config.enableThinking,
       prompt: prompt,
       currentState: currentState,
       mode: mode,
@@ -105,6 +107,7 @@ export class AiService {
       apiKey: config.apiKey,
       apiUrl: config.apiUrl,
       model: config.model,
+      enableThinking: !!config.enableThinking,
       currentState: currentState
     };
 
@@ -153,7 +156,8 @@ export class AiService {
     const payload = {
       provider: config.provider,
       apiKey: config.apiKey,
-      apiUrl: config.apiUrl
+      apiUrl: config.apiUrl,
+      enableThinking: !!config.enableThinking
     };
 
     const response = await fetch('/api/ai/test-connection', {
