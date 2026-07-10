@@ -463,8 +463,8 @@ function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, 
         ]
       };
 
+      requestPayload.chat_template_kwargs = { enable_thinking: !!enableThinking };
       if (enableThinking) {
-        requestPayload.chat_template_kwargs = { enable_thinking: true };
         requestPayload.max_tokens = 8192;
       }
 
