@@ -502,7 +502,17 @@
 
 							<div id="ai-model-group">
 								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">Modelo:</label>
-								<input type="text" id="ai-model" placeholder="ej: gemini-1.5-flash, gpt-4o-mini, qwen2.5-coder" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main);" />
+								<div style="display: flex; gap: 8px;">
+									<select id="ai-model-select" style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main);">
+										<!-- Dynamic models populated here -->
+									</select>
+									<button type="button" id="btn-sync-models" class="btn btn-secondary" style="padding: 10px; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); cursor: pointer;" title="Sincronizar modelos del servicio">
+										<i data-lucide="refresh-cw" style="width: 16px; height: 16px;"></i>
+									</button>
+								</div>
+								<div id="ai-custom-model-group" class="hidden" style="margin-top: 8px;">
+									<input type="text" id="ai-model" placeholder="ej: gemini-1.5-flash, gpt-4o-mini, qwen2.5-coder" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main);" />
+								</div>
 							</div>
 
 							<div id="ai-apikey-group">
@@ -513,6 +523,16 @@
 							<div id="ai-apiurl-group" class="hidden">
 								<label style="display: block; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 6px;">URL de Ollama:</label>
 								<input type="text" id="ai-apiurl" value="http://localhost:11434" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main);" />
+							</div>
+
+							<!-- Connection test section -->
+							<div style="display: flex; gap: 10px; align-items: center; margin-top: 10px; background: rgba(255, 255, 255, 0.01); border: 1px dashed var(--color-border); border-radius: 8px; padding: 12px;">
+								<button type="button" id="btn-test-ai-connection" class="btn btn-secondary" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 0.85rem; padding: 8px 12px; cursor: pointer;">
+									<i data-lucide="activity" style="width: 15px; height: 15px;"></i> Probar Conexión
+								</button>
+								<div id="ai-test-connection-status" style="font-size: 0.85rem; display: flex; align-items: center; gap: 6px; min-width: 120px; color: var(--color-text-muted);">
+									<span style="font-style: italic;">Sin verificar</span>
+								</div>
 							</div>
 
 							<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px;">

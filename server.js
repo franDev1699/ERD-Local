@@ -725,6 +725,167 @@ function makeAiDocRequest({ provider, apiKey, apiUrl, model, currentState, userI
   });
 }
 
+// Obtener la lista de modelos disponibles para un proveedor de IA de forma nativa
+function fetchModelsFromProvider({ provider, apiKey, apiUrl }) {
+  return new Promise((resolve, reject) => {
+    let clientModule = https;
+    let url = '';
+    let options = {
+      method: 'GET',
+      headers: {}
+    };
+
+    if (provider === 'gemini') {
+      const key = apiKey || '';
+      url = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`;
+      options.headers['Content-Type'] = 'application/json';
+      
+      const req = https.request(url, options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              return reject(new Error(parsed.error.message || 'Error en la API de Gemini'));
+            }
+            if (!parsed.models || !Array.isArray(parsed.models)) {
+              return reject(new Error('Formato de respuesta inválido de Gemini'));
+            }
+            const models = parsed.models
+              .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+              .map(m => ({
+                id: m.name.replace(/^models\//, ''),
+                name: m.displayName || m.name.replace(/^models\//, '')
+              }));
+            resolve(models);
+          } catch (e) {
+            reject(new Error('La respuesta de Gemini no se pudo procesar: ' + e.message));
+          }
+        });
+      });
+      req.on('error', (e) => reject(new Error(`No se pudo conectar con la API de Gemini: ${e.message}`)));
+      req.end();
+
+    } else if (provider === 'openai') {
+      url = 'https://api.openai.com/v1/models';
+      options.headers['Authorization'] = `Bearer ${apiKey}`;
+      options.headers['Content-Type'] = 'application/json';
+
+      const req = https.request(url, options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              return reject(new Error(parsed.error.message || 'Error en la API de OpenAI'));
+            }
+            if (!parsed.data || !Array.isArray(parsed.data)) {
+              return reject(new Error('Formato de respuesta inválido de OpenAI'));
+            }
+            const models = parsed.data
+              .filter(m => m.id.includes('gpt') || m.id.includes('o1') || m.id.includes('o3') || m.id.includes('davinci') || m.id.includes('babbage'))
+              .map(m => ({
+                id: m.id,
+                name: m.id
+              }))
+              .sort((a, b) => a.id.localeCompare(b.id));
+            resolve(models);
+          } catch (e) {
+            reject(new Error('La respuesta de OpenAI no se pudo procesar: ' + e.message));
+          }
+        });
+      });
+      req.on('error', (e) => reject(new Error(`No se pudo conectar con la API de OpenAI: ${e.message}`)));
+      req.end();
+
+    } else if (provider === 'ollama') {
+      const ollamaUrl = apiUrl || 'http://localhost:11434';
+      url = `${ollamaUrl}/api/tags`;
+      clientModule = ollamaUrl.startsWith('https') ? https : http;
+
+      const req = clientModule.request(url, options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              return reject(new Error(parsed.error || 'Error en la API de Ollama'));
+            }
+            if (!parsed.models || !Array.isArray(parsed.models)) {
+              return reject(new Error('Formato de respuesta de Ollama inválido'));
+            }
+            const models = parsed.models.map(m => ({
+              id: m.name,
+              name: m.name
+            }));
+            resolve(models);
+          } catch (e) {
+            reject(new Error('La respuesta de Ollama no se pudo procesar: ' + e.message));
+          }
+        });
+      });
+      req.on('error', (e) => reject(new Error(`Ollama no está disponible en la URL proporcionada (${ollamaUrl}): ${e.message}`)));
+      req.end();
+
+    } else if (['vllm', 'litellm', 'custom-openai'].includes(provider)) {
+      let requestUrl = apiUrl || '';
+      requestUrl = requestUrl.trim();
+      if (requestUrl.endsWith('/')) {
+        requestUrl = requestUrl.slice(0, -1);
+      }
+      if (requestUrl.endsWith('/chat/completions')) {
+        requestUrl = requestUrl.replace(/\/chat\/completions$/, '/models');
+      } else if (requestUrl.endsWith('/v1')) {
+        requestUrl = `${requestUrl}/models`;
+      } else if (requestUrl.includes('/v1')) {
+        if (!requestUrl.endsWith('/models')) {
+          requestUrl = `${requestUrl}/models`;
+        }
+      } else {
+        requestUrl = `${requestUrl}/v1/models`;
+      }
+
+      clientModule = requestUrl.startsWith('https') ? https : http;
+      options.headers['Content-Type'] = 'application/json';
+      if (apiKey) {
+        options.headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
+      const req = clientModule.request(requestUrl, options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              const errMsg = parsed.error.message || (typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error));
+              return reject(new Error(errMsg || 'Error en el servidor compatible con OpenAI'));
+            }
+            if (!parsed.data || !Array.isArray(parsed.data)) {
+              return reject(new Error('Formato de respuesta compatible con OpenAI inválido'));
+            }
+            const models = parsed.data.map(m => ({
+              id: m.id,
+              name: m.id
+            }));
+            resolve(models);
+          } catch (e) {
+            reject(new Error('La respuesta del servidor no se pudo procesar: ' + e.message));
+          }
+        });
+      });
+      req.on('error', (e) => reject(new Error(`Servidor inaccesible en ${requestUrl}: ${e.message}`)));
+      req.end();
+
+    } else {
+      reject(new Error('Proveedor no soportado para listar modelos.'));
+    }
+  });
+}
+
 // Limpia posibles tags markdown del JSON devuelto por la IA
 function cleanJsonResponseText(text) {
   let cleaned = text.trim();
@@ -1384,6 +1545,61 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ markdown: mdDoc }));
       } catch (err) {
         console.error('Error al documentar BD con IA:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/ai/models - Obtener lista de modelos para un proveedor
+    if (req.method === 'POST' && cleanUrl === '/api/ai/models') {
+      try {
+        const params = await readJsonBody(req);
+        if (!params.provider) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'El proveedor es obligatorio.' }));
+          return;
+        }
+        const requiresApiKey = ['gemini', 'openai'].includes(params.provider);
+        if (requiresApiKey && !params.apiKey) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'La API Key es obligatoria para proveedores Cloud.' }));
+          return;
+        }
+
+        const models = await fetchModelsFromProvider(params);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, models }));
+      } catch (err) {
+        console.error('Error al obtener modelos de IA:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/ai/test-connection - Probar conexión con el proveedor de IA
+    if (req.method === 'POST' && cleanUrl === '/api/ai/test-connection') {
+      try {
+        const params = await readJsonBody(req);
+        if (!params.provider) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'El proveedor es obligatorio.' }));
+          return;
+        }
+        const requiresApiKey = ['gemini', 'openai'].includes(params.provider);
+        if (requiresApiKey && !params.apiKey) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'La API Key es obligatoria para proveedores Cloud.' }));
+          return;
+        }
+
+        // Test connection by fetching models list
+        await fetchModelsFromProvider(params);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Conexión exitosa' }));
+      } catch (err) {
+        console.error('Error al probar conexión con IA:', err.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }

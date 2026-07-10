@@ -43,6 +43,11 @@ export class AiController {
     // Config Fields
     const selectProvider = document.getElementById("ai-provider");
     const inputModel = document.getElementById("ai-model");
+    const selectModel = document.getElementById("ai-model-select");
+    const btnSyncModels = document.getElementById("btn-sync-models");
+    const customModelGroup = document.getElementById("ai-custom-model-group");
+    const btnTestConnection = document.getElementById("btn-test-ai-connection");
+    const testConnectionStatus = document.getElementById("ai-test-connection-status");
     const inputApiKey = document.getElementById("ai-apikey");
     const inputApiUrl = document.getElementById("ai-apiurl");
     const btnSaveConfig = document.getElementById("btn-save-ai-config");
@@ -96,6 +101,176 @@ export class AiController {
     // Open/Close
     const btnDashboardConfig = document.getElementById("btn-dashboard-ai-config");
 
+    const DEFAULT_MODELS = {
+      gemini: ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp', 'gemini-2.5-flash'],
+      openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo', 'o1-mini', 'o3-mini'],
+      ollama: ['qwen2.5-coder', 'llama3', 'mistral', 'codegemma'],
+      vllm: ['Qwen/Qwen2.5-Coder-7B-Instruct', 'meta-llama/Meta-Llama-3-8B-Instruct'],
+      litellm: ['qwen2.5-coder', 'gpt-4o-mini'],
+      'custom-openai': []
+    };
+
+    const populateModelsList = async (provider, selectedValue = '') => {
+      if (!selectModel) return;
+      selectModel.innerHTML = "";
+
+      // Add loading option
+      selectModel.innerHTML = `<option value="">Cargando modelos...</option>`;
+
+      let models = [];
+      const config = {
+        provider: provider,
+        apiKey: inputApiKey ? inputApiKey.value.trim() : '',
+        apiUrl: inputApiUrl ? inputApiUrl.value.trim() : ''
+      };
+
+      try {
+        const requiresApiKey = ['gemini', 'openai'].includes(provider);
+        const requiresUrl = ['ollama', 'vllm', 'litellm', 'custom-openai'].includes(provider);
+
+        if ((requiresApiKey && config.apiKey) || (requiresUrl && config.apiUrl) || (!requiresApiKey && !requiresUrl)) {
+          models = await AiService.fetchModels(config);
+        }
+      } catch (err) {
+        console.warn("No se pudieron obtener modelos del servidor, usando predefinidos:", err.message);
+      }
+
+      if (!models || models.length === 0) {
+        const defaults = DEFAULT_MODELS[provider] || [];
+        models = defaults.map(m => ({ id: m, name: m }));
+      }
+
+      selectModel.innerHTML = "";
+
+      if (models.length === 0) {
+        const optCustom = document.createElement("option");
+        optCustom.value = "custom";
+        optCustom.textContent = "Personalizado (especificar...)";
+        selectModel.appendChild(optCustom);
+      } else {
+        models.forEach(m => {
+          const opt = document.createElement("option");
+          opt.value = m.id;
+          opt.textContent = m.name;
+          selectModel.appendChild(opt);
+        });
+
+        const optCustom = document.createElement("option");
+        optCustom.value = "custom";
+        optCustom.textContent = "Otro / Personalizado (especificar...)";
+        selectModel.appendChild(optCustom);
+      }
+
+      const optionsArray = Array.from(selectModel.options).map(o => o.value);
+      if (selectedValue && optionsArray.includes(selectedValue)) {
+        selectModel.value = selectedValue;
+        if (customModelGroup) customModelGroup.classList.add("hidden");
+      } else if (selectedValue) {
+        selectModel.value = "custom";
+        if (inputModel) inputModel.value = selectedValue;
+        if (customModelGroup) customModelGroup.classList.remove("hidden");
+      } else {
+        if (selectModel.value !== 'custom') {
+          if (inputModel) inputModel.value = selectModel.value;
+          if (customModelGroup) customModelGroup.classList.add("hidden");
+        } else {
+          if (customModelGroup) customModelGroup.classList.remove("hidden");
+        }
+      }
+    };
+
+    if (selectModel) {
+      selectModel.addEventListener("change", (e) => {
+        if (e.target.value === "custom") {
+          if (customModelGroup) customModelGroup.classList.remove("hidden");
+          if (inputModel) {
+            inputModel.value = "";
+            inputModel.focus();
+          }
+        } else {
+          if (customModelGroup) customModelGroup.classList.add("hidden");
+          if (inputModel) inputModel.value = e.target.value;
+        }
+      });
+    }
+
+    if (btnSyncModels) {
+      btnSyncModels.addEventListener("click", async () => {
+        btnSyncModels.disabled = true;
+        const currentIcon = btnSyncModels.innerHTML;
+        btnSyncModels.innerHTML = `<span class="spinner-loader" style="width: 14px; height: 14px; border-width: 2px;"></span>`;
+        
+        try {
+          const provider = selectProvider ? selectProvider.value : 'gemini';
+          const currentVal = inputModel ? inputModel.value.trim() : '';
+          await populateModelsList(provider, currentVal);
+          this.uiManager.showToast("Modelos sincronizados correctamente.", "success");
+        } catch (err) {
+          this.uiManager.showToast("Error al sincronizar modelos: " + err.message, "error");
+        } finally {
+          btnSyncModels.disabled = false;
+          btnSyncModels.innerHTML = currentIcon;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+
+    if (btnTestConnection) {
+      btnTestConnection.addEventListener("click", async () => {
+        btnTestConnection.disabled = true;
+        if (testConnectionStatus) {
+          testConnectionStatus.innerHTML = `<i data-lucide="loader" class="animate-spin" style="width: 14px; height: 14px; color: var(--color-primary);"></i> <span style="color: var(--color-text-muted);">Probando...</span>`;
+          if (window.lucide) window.lucide.createIcons();
+        }
+
+        const config = {
+          provider: selectProvider ? selectProvider.value : 'gemini',
+          model: inputModel ? inputModel.value.trim() : '',
+          apiKey: inputApiKey ? inputApiKey.value.trim() : '',
+          apiUrl: inputApiUrl ? inputApiUrl.value.trim() : ''
+        };
+
+        const requiresApiKey = ['gemini', 'openai'].includes(config.provider);
+        if (requiresApiKey && !config.apiKey) {
+          this.uiManager.showToast("La clave API es requerida para probar la conexión.", "error");
+          btnTestConnection.disabled = false;
+          if (testConnectionStatus) {
+            testConnectionStatus.innerHTML = `<i data-lucide="x-circle" style="width: 14px; height: 14px; color: #ef4444;"></i> <span style="color: #ef4444; font-weight: 500;">Falta API Key</span>`;
+            if (window.lucide) window.lucide.createIcons();
+          }
+          return;
+        }
+
+        const requiresUrl = ['ollama', 'vllm', 'litellm', 'custom-openai'].includes(config.provider);
+        if (requiresUrl && !config.apiUrl) {
+          this.uiManager.showToast("La URL del servidor es requerida para probar la conexión.", "error");
+          btnTestConnection.disabled = false;
+          if (testConnectionStatus) {
+            testConnectionStatus.innerHTML = `<i data-lucide="x-circle" style="width: 14px; height: 14px; color: #ef4444;"></i> <span style="color: #ef4444; font-weight: 500;">Falta URL</span>`;
+            if (window.lucide) window.lucide.createIcons();
+          }
+          return;
+        }
+
+        try {
+          await AiService.testConnection(config);
+          if (testConnectionStatus) {
+            testConnectionStatus.innerHTML = `<i data-lucide="check-circle" style="width: 14px; height: 14px; color: #10b981;"></i> <span style="color: #10b981; font-weight: 600;">Exitosa</span>`;
+          }
+          this.uiManager.showToast("Conexión con el proveedor de IA establecida con éxito.", "success");
+        } catch (err) {
+          console.error(err);
+          if (testConnectionStatus) {
+            testConnectionStatus.innerHTML = `<i data-lucide="x-circle" style="width: 14px; height: 14px; color: #ef4444;"></i> <span style="color: #ef4444; font-weight: 500;" title="${err.message}">Fallida</span>`;
+          }
+          this.uiManager.showToast("La prueba de conexión falló: " + err.message, "error");
+        } finally {
+          btnTestConnection.disabled = false;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+
     const openConfigModal = () => {
       const config = AiService.loadConfig();
       if (selectProvider) selectProvider.value = config.provider;
@@ -103,8 +278,15 @@ export class AiController {
       if (inputApiKey) inputApiKey.value = config.apiKey;
       if (inputApiUrl) inputApiUrl.value = config.apiUrl;
 
+      if (testConnectionStatus) {
+        testConnectionStatus.innerHTML = `<span style="font-style: italic;">Sin verificar</span>`;
+      }
+
       // Mostrar/ocultar inputs según el proveedor
       toggleProviderFields(config.provider);
+
+      // Poblar el selector de modelos con el valor seleccionado actualmente
+      populateModelsList(config.provider, config.model);
 
       // Pre-cargar prompts en segundo plano
       loadPromptsFromServer();
@@ -380,22 +562,36 @@ export class AiController {
 
     if (selectProvider) {
       selectProvider.addEventListener("change", (e) => {
-        toggleProviderFields(e.target.value);
-        // Sugerir modelos comunes al cambiar
-        if (e.target.value === 'gemini') {
-          inputModel.value = 'gemini-1.5-flash';
-        } else if (e.target.value === 'openai') {
-          inputModel.value = 'gpt-4o-mini';
-        } else if (e.target.value === 'ollama') {
-          inputModel.value = 'qwen2.5-coder';
-        } else if (e.target.value === 'vllm') {
-          inputModel.value = 'Qwen/Qwen2.5-Coder-7B-Instruct';
-        } else if (e.target.value === 'litellm') {
-          inputModel.value = 'qwen2.5-coder';
-        } else if (e.target.value === 'custom-openai') {
-          inputModel.value = '';
-          inputModel.placeholder = "ej: llama-3.1-8b-instant";
+        const provider = e.target.value;
+        toggleProviderFields(provider);
+        
+        let defaultModel = '';
+        if (provider === 'gemini') {
+          defaultModel = 'gemini-1.5-flash';
+        } else if (provider === 'openai') {
+          defaultModel = 'gpt-4o-mini';
+        } else if (provider === 'ollama') {
+          defaultModel = 'qwen2.5-coder';
+        } else if (provider === 'vllm') {
+          defaultModel = 'Qwen/Qwen2.5-Coder-7B-Instruct';
+        } else if (provider === 'litellm') {
+          defaultModel = 'qwen2.5-coder';
+        } else if (provider === 'custom-openai') {
+          defaultModel = '';
         }
+
+        if (inputModel) {
+          inputModel.value = defaultModel;
+          if (provider === 'custom-openai') {
+            inputModel.placeholder = "ej: llama-3.1-8b-instant";
+          }
+        }
+
+        if (testConnectionStatus) {
+          testConnectionStatus.innerHTML = `<span style="font-style: italic;">Sin verificar</span>`;
+        }
+
+        populateModelsList(provider, defaultModel);
       });
     }
 

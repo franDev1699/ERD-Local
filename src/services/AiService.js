@@ -91,4 +91,51 @@ export class AiService {
     const data = await response.json();
     return data.markdown;
   }
+
+  static async fetchModels(config) {
+    const payload = {
+      provider: config.provider,
+      apiKey: config.apiKey,
+      apiUrl: config.apiUrl
+    };
+
+    const response = await fetch('/api/ai/models', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.models || [];
+  }
+
+  static async testConnection(config) {
+    const payload = {
+      provider: config.provider,
+      apiKey: config.apiKey,
+      apiUrl: config.apiUrl
+    };
+
+    const response = await fetch('/api/ai/test-connection', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json();
+  }
 }
