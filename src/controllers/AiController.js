@@ -841,15 +841,10 @@ export class AiController {
           const selectContextDepth = document.getElementById("ai-context-depth");
           const contextDepth = selectContextDepth ? selectContextDepth.value : "all";
           
-          // Realizar llamada al proxy con reporte de progreso en vivo
+          // Realizar llamada al proxy
           const result = await AiService.generate(prompt, mode !== 'replace' ? currentState : null, mode, {
             contextDepth: contextDepth,
             selectedTableIds: this.getSelectedTableIds ? Array.from(this.getSelectedTableIds()) : []
-          }, (progressMessage) => {
-            if (statusLog) {
-              statusLog.innerHTML = `<i data-lucide="loader" class="animate-spin" style="width: 14px; height: 14px; margin-right: 6px;"></i> ${progressMessage}`;
-              if (window.lucide) window.lucide.createIcons();
-            }
           });
 
           if (!result || !result.tables || !Array.isArray(result.tables)) {

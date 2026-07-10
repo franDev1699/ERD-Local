@@ -148,6 +148,13 @@ export class CollabController {
       this.updateCollaboratorCursor(data.payload);
     } else if (data.type === 'save_ack' && data.error) {
       this.uiManager.showToast(data.error, "error");
+    } else if (data.type === 'ai_status_progress') {
+      const statusLog = document.getElementById("ai-status-log");
+      if (statusLog) {
+        statusLog.className = "ai-status-log info";
+        statusLog.innerHTML = `<i data-lucide="loader" class="animate-spin" style="width: 14px; height: 14px; margin-right: 6px;"></i> ${data.message}`;
+        if (window.lucide) window.lucide.createIcons();
+      }
     }
   }
 

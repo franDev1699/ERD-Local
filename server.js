@@ -385,8 +385,26 @@ function mergeLayoutResult(originalState, layoutResult) {
   return merged;
 }
 
-// Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa con soporte para auto-continuar respuestas truncadas y reportar progreso vía SSE
-async function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds, userId, enableThinking }, onProgress) {
+// Enviar un mensaje de estado/progreso al WebSocket activo del usuario
+function sendUserStatusLog(userId, message) {
+  rooms.forEach((room) => {
+    room.forEach((client) => {
+      if (client.user && client.user.id === userId && client.state === 1) {
+        try {
+          sendFrame(client.socket, {
+            type: 'ai_status_progress',
+            message: message
+          });
+        } catch (e) {
+          console.error('Error enviando log de progreso por WS:', e.message);
+        }
+      }
+    });
+  });
+}
+
+// Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa con soporte para auto-continuar respuestas truncadas
+async function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds, userId, enableThinking }) {
   let promptTemplate = '';
   const prompts = AiPromptRepository.getPromptsForUser(userId);
   if (mode === 'append') {
@@ -536,9 +554,7 @@ Estado actual del diagrama:
 
     let partContent = '';
     
-    if (onProgress) {
-      onProgress({ status: 'info', message: 'Conectando con el servidor de IA...' });
-    }
+    sendUserStatusLog(userId, 'Conectando con el servidor de IA...');
 
     while (finishReason === 'length' && attempts < maxAttempts) {
       attempts++;
@@ -546,9 +562,7 @@ Estado actual del diagrama:
       if (attempts > 1) {
         const msg = `La respuesta se truncó (intento ${attempts - 1}). Solicitando continuación...`;
         console.log(`[makeAiRequest] ${msg}`);
-        if (onProgress) {
-          onProgress({ status: 'info', message: msg });
-        }
+        sendUserStatusLog(userId, msg);
         messages.push({ role: 'assistant', content: partContent });
         messages.push({
           role: 'user',
@@ -596,9 +610,7 @@ Estado actual del diagrama:
       textResponse += partContent;
       finishReason = parsed.choices[0].finish_reason;
       
-      if (onProgress) {
-        onProgress({ status: 'info', message: `Procesados ${textResponse.length} caracteres de respuesta...` });
-      }
+      sendUserStatusLog(userId, `Procesados ${textResponse.length} caracteres de respuesta...`);
     }
 
     try {
@@ -1706,33 +1718,15 @@ const server = http.createServer(async (req, res) => {
 
         params.userId = session.user_id; // Inyectar id del usuario
         const originalState = params.currentState;
+        const aiResult = await makeAiRequest(params);
 
-        // Configurar SSE (Server-Sent Events) para reportar progreso en vivo al cliente
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive'
-        });
-
-        // Enviar evento inicial de conexión
-        res.write(`data: ${JSON.stringify({ status: 'progress', message: 'Conectando con el proxy...' })}\n\n`);
-
-        try {
-          const aiResult = await makeAiRequest(params, (progress) => {
-            res.write(`data: ${JSON.stringify({ status: 'progress', message: progress.message })}\n\n`);
-          });
-
-          let finalResult = aiResult;
-          if (params.mode === 'layout' && originalState) {
-            finalResult = mergeLayoutResult(originalState, aiResult);
-          }
-
-          res.write(`data: ${JSON.stringify({ status: 'success', data: finalResult })}\n\n`);
-          res.end();
-        } catch (err) {
-          res.write(`data: ${JSON.stringify({ status: 'error', error: err.message })}\n\n`);
-          res.end();
+        let finalResult = aiResult;
+        if (params.mode === 'layout' && originalState) {
+          finalResult = mergeLayoutResult(originalState, aiResult);
         }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: finalResult }));
       } catch (err) {
         console.error('Error en Proxy de IA:', err.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
