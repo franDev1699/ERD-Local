@@ -590,7 +590,7 @@ Estado actual del diagrama:
     }
 
     try {
-      return JSON.parse(cleanJsonResponseText(textResponse));
+      return tryParseJSONResponse(textResponse);
     } catch (parseErr) {
       if (finishReason === 'length') {
         throw new Error('La respuesta de la IA se interrumpió por límite de longitud (finish_reason: length) y no se pudo procesar como JSON después de varios intentos de continuación.');
@@ -980,6 +980,35 @@ function cleanJsonResponseText(text) {
     cleaned = cleaned.substring(0, cleaned.length - 3);
   }
   return cleaned.trim();
+}
+
+// Intenta parsear el JSON de forma robusta, buscando bloques válidos si la respuesta concatenada falló
+function tryParseJSONResponse(text) {
+  const cleaned = cleanJsonResponseText(text);
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    // Si falla, busquemos el último bloque JSON { ... } completo en el texto
+    // (Útil si el modelo recomenzó desde el principio en la continuación)
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      const candidate = text.slice(firstBrace, lastBrace + 1);
+      try {
+        return JSON.parse(cleanJsonResponseText(candidate));
+      } catch (e) {
+        // Intentar buscar el último bloque '{' si hubo un reinicio completo en la concatenación
+        const lastStartBrace = text.lastIndexOf('{');
+        if (lastStartBrace !== -1 && lastStartBrace > firstBrace && lastBrace > lastStartBrace) {
+          const lastCandidate = text.slice(lastStartBrace, lastBrace + 1);
+          try {
+            return JSON.parse(cleanJsonResponseText(lastCandidate));
+          } catch (e2) {}
+        }
+      }
+    }
+    throw err;
+  }
 }
 
 // Helper to get client IP
