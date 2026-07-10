@@ -1153,6 +1153,29 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // GET /api/projects/my-role - Get current user's role for a specific project
+    if (req.method === 'GET' && cleanUrl === '/api/projects/my-role') {
+      try {
+        const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const projectId = urlObj.searchParams.get('project');
+        if (!projectId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Proyecto no especificado' }));
+          return;
+        }
+
+        const role = ProjectRepository.getProjectRole(projectId, session.user_id);
+        const isAdmin = session.is_admin === 1;
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ role: role || (isAdmin ? 'admin' : null), is_admin: isAdmin }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
     // GET /api/projects/members - List project members
     if (req.method === 'GET' && cleanUrl === '/api/projects/members') {
       try {

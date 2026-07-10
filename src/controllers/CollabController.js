@@ -293,8 +293,14 @@ export class CollabController {
         this.myUser = {
           userId: userData.userId,
           username: userData.display_name,
-          color: userData.color || '#6366f1'
+          color: userData.color || '#6366f1',
+          is_admin: userData.is_admin === 1
         };
+
+        // Fetch project-specific role if we're inside a project
+        if (this.projectId) {
+          await this._fetchProjectRole();
+        }
 
         // Render user profile bar in sidebar
         const avatarEl = document.getElementById('user-profile-avatar');
@@ -305,6 +311,17 @@ export class CollabController {
         }
         if (nameEl) {
           nameEl.textContent = this.myUser.username;
+        }
+
+        // Show role badge in sidebar if inside a project
+        if (this.projectId && this.myProjectRole) {
+          const roleLabel = this.myProjectRole === 'owner' ? 'Creador'
+            : this.myProjectRole === 'editor' ? 'Editor' : 'Lector';
+          const roleBadge = document.getElementById('user-project-role-badge');
+          if (roleBadge) {
+            roleBadge.textContent = roleLabel;
+            roleBadge.style.display = 'inline-block';
+          }
         }
 
         // Render user profile in dashboard
@@ -348,10 +365,22 @@ export class CollabController {
           btnDashAdmin.onclick = () => this.openAdminPanel();
         }
 
-        // Setup Members Panel event
+        // Setup Members Panel event — only show for owners/admins
         const btnManageMembers = document.getElementById('btn-manage-members');
         if (btnManageMembers) {
-          btnManageMembers.onclick = () => this.openMembersPanel();
+          const canManage = this.myProjectRole === 'owner' || this.myUser.is_admin;
+          if (canManage) {
+            btnManageMembers.onclick = () => this.openMembersPanel();
+          } else {
+            // Non-owners can view the list but not manage
+            btnManageMembers.onclick = () => this.openMembersPanel();
+            btnManageMembers.title = 'Ver Colaboradores (solo lectura)';
+          }
+        }
+
+        // Show read-only banner for viewers
+        if (this.myProjectRole === 'viewer') {
+          this.uiManager.showToast('Modo lectura — Solo puedes visualizar este proyecto.', 'info');
         }
 
         if (this.webSocket.isConnected) {
@@ -364,11 +393,32 @@ export class CollabController {
     });
   }
 
+  /**
+   * Fetches the current user's role for this project from the server.
+   * Stores result in this.myProjectRole ('owner', 'editor', 'viewer', or null).
+   */
+  async _fetchProjectRole() {
+    try {
+      const res = await fetch(`/api/projects/my-role?project=${encodeURIComponent(this.projectId)}`);
+      if (!res.ok) {
+        this.myProjectRole = null;
+        return;
+      }
+      const data = await res.json();
+      this.myProjectRole = data.role;
+    } catch (e) {
+      console.error('Error al obtener rol del proyecto:', e);
+      this.myProjectRole = null;
+    }
+  }
+
   async openMembersPanel() {
     const modal = document.getElementById('members-modal');
     if (!modal) return;
 
     modal.classList.remove('hidden');
+
+    const canManage = this.myProjectRole === 'owner' || this.myUser?.is_admin;
 
     const btnClose = document.getElementById('btn-close-members-modal');
     btnClose.onclick = () => modal.classList.add('hidden');
@@ -378,8 +428,24 @@ export class CollabController {
     const roleSelect = document.getElementById('member-role-select');
     const btnAdd = document.getElementById('btn-add-member');
 
-    // Populate user select dropdown list
-    if (userSelect) {
+    // Hide add-member form for non-owners
+    const addMemberContainer = document.getElementById('member-add-container');
+    const addMemberSeparator = addMemberContainer ? addMemberContainer.nextElementSibling : null; // the <hr>
+    if (!canManage) {
+      if (addMemberContainer) addMemberContainer.style.display = 'none';
+      if (addMemberSeparator && addMemberSeparator.tagName === 'HR') addMemberSeparator.style.display = 'none';
+      // Update modal title to "Ver Colaboradores"
+      const modalTitle = modal.querySelector('.modal-header h2');
+      if (modalTitle) modalTitle.textContent = 'Colaboradores del Proyecto';
+    } else {
+      if (addMemberContainer) addMemberContainer.style.display = '';
+      if (addMemberSeparator && addMemberSeparator.tagName === 'HR') addMemberSeparator.style.display = '';
+      const modalTitle = modal.querySelector('.modal-header h2');
+      if (modalTitle) modalTitle.textContent = 'Administrar Colaboradores';
+    }
+
+    // Populate user select dropdown list (only for owners)
+    if (userSelect && canManage) {
       userSelect.innerHTML = '<option value="">Cargando colaboradores...</option>';
       try {
         const res = await fetch(`/api/users/list?project=${encodeURIComponent(this.projectId)}`);
@@ -405,7 +471,13 @@ export class CollabController {
       membersTable.innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 10px;">Cargando...</td></tr>';
       try {
         const res = await fetch(`/api/projects/members?project=${encodeURIComponent(this.projectId)}`);
-        if (!res.ok) throw new Error();
+        if (!res.ok) {
+          if (res.status === 403) {
+            membersTable.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--color-text-muted); padding: 10px;">No tienes permisos para ver los miembros de este proyecto.</td></tr>';
+            return;
+          }
+          throw new Error();
+        }
         const members = await res.json();
         membersTable.innerHTML = '';
         members.forEach(member => {
@@ -423,7 +495,7 @@ export class CollabController {
               </span>
             </td>
             <td style="padding: 8px; text-align: right; vertical-align: middle;">
-              ${!isOwner ? `<button class="btn-remove-member btn-icon" data-userid="${member.user_id}" style="border: none; background: transparent; color: var(--color-danger); cursor: pointer;"><i data-lucide="trash-2" style="width: 14px; height: 14px;"></i></button>` : ''}
+              ${canManage && !isOwner ? `<button class="btn-remove-member btn-icon" data-userid="${member.user_id}" style="border: none; background: transparent; color: var(--color-danger); cursor: pointer;"><i data-lucide="trash-2" style="width: 14px; height: 14px;"></i></button>` : ''}
             </td>
           `;
           membersTable.appendChild(tr);
@@ -431,59 +503,63 @@ export class CollabController {
 
         if (window.lucide) window.lucide.createIcons();
 
-        membersTable.querySelectorAll('.btn-remove-member').forEach(btn => {
-          btn.onclick = async () => {
-            const userId = btn.getAttribute('data-userid');
-            if (confirm('¿Estás seguro de que deseas remover a este colaborador?')) {
-              const removeRes = await fetch(`/api/projects/remove-member?project=${encodeURIComponent(this.projectId)}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId })
-              });
-              if (removeRes.ok) {
-                this.uiManager.showToast('Colaborador removido.', 'success');
-                loadMembers();
-              } else {
-                const err = await removeRes.json();
-                this.uiManager.showToast(err.error || 'Error al remover colaborador.', 'error');
+        if (canManage) {
+          membersTable.querySelectorAll('.btn-remove-member').forEach(btn => {
+            btn.onclick = async () => {
+              const userId = btn.getAttribute('data-userid');
+              if (confirm('¿Estás seguro de que deseas remover a este colaborador?')) {
+                const removeRes = await fetch(`/api/projects/remove-member?project=${encodeURIComponent(this.projectId)}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ userId })
+                });
+                if (removeRes.ok) {
+                  this.uiManager.showToast('Colaborador removido.', 'success');
+                  loadMembers();
+                } else {
+                  const err = await removeRes.json();
+                  this.uiManager.showToast(err.error || 'Error al remover colaborador.', 'error');
+                }
               }
-            }
-          };
-        });
+            };
+          });
+        }
       } catch (e) {
         membersTable.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--color-danger); padding: 10px;">Error al cargar miembros</td></tr>';
       }
     };
 
-    btnAdd.onclick = async () => {
-      const username = userSelect ? userSelect.value : '';
-      const role = roleSelect.value;
-      if (!username) {
-        this.uiManager.showToast('Por favor, selecciona un colaborador.', 'warning');
-        return;
-      }
-
-      btnAdd.disabled = true;
-      try {
-        const res = await fetch(`/api/projects/members?project=${encodeURIComponent(this.projectId)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, role })
-        });
-        if (res.ok) {
-          this.uiManager.showToast('Colaborador agregado con éxito.', 'success');
-          if (userSelect) userSelect.value = '';
-          loadMembers();
-        } else {
-          const err = await res.json();
-          this.uiManager.showToast(err.error || 'Error al agregar colaborador.', 'error');
+    if (btnAdd && canManage) {
+      btnAdd.onclick = async () => {
+        const username = userSelect ? userSelect.value : '';
+        const role = roleSelect.value;
+        if (!username) {
+          this.uiManager.showToast('Por favor, selecciona un colaborador.', 'warning');
+          return;
         }
-      } catch (e) {
-        this.uiManager.showToast('Error de conexión.', 'error');
-      } finally {
-        btnAdd.disabled = false;
-      }
-    };
+
+        btnAdd.disabled = true;
+        try {
+          const res = await fetch(`/api/projects/members?project=${encodeURIComponent(this.projectId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, role })
+          });
+          if (res.ok) {
+            this.uiManager.showToast('Colaborador agregado con éxito.', 'success');
+            if (userSelect) userSelect.value = '';
+            loadMembers();
+          } else {
+            const err = await res.json();
+            this.uiManager.showToast(err.error || 'Error al agregar colaborador.', 'error');
+          }
+        } catch (e) {
+          this.uiManager.showToast('Error de conexión.', 'error');
+        } finally {
+          btnAdd.disabled = false;
+        }
+      };
+    }
 
     loadMembers();
   }
