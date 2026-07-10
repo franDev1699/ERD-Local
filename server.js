@@ -12,6 +12,7 @@ const SessionRepository = require('./src/db/SessionRepository');
 const ProjectRepository = require('./src/db/ProjectRepository');
 const AiPromptRepository = require('./src/db/AiPromptRepository');
 const SystemSettingsRepository = require('./src/db/SystemSettingsRepository');
+const UserAiConfigRepository = require('./src/db/UserAiConfigRepository');
 const { hashPassword, verifyPassword } = require('./src/db/auth');
 const rateLimiter = require('./src/security/rateLimiter');
 const { validatePassword } = require('./src/security/passwordValidator');
@@ -909,6 +910,23 @@ function getClientIp(req) {
   return req.socket.remoteAddress || '127.0.0.1';
 }
 
+// Resolver los parámetros de configuración de IA utilizando la base de datos para enmascarar la API Key
+function resolveAiParams(userId, clientParams) {
+  const savedConfig = UserAiConfigRepository.getUserConfig(userId);
+  const resolved = {
+    provider: clientParams.provider || (savedConfig ? savedConfig.provider : ''),
+    model: clientParams.model || (savedConfig ? savedConfig.model : ''),
+    apiUrl: clientParams.apiUrl || (savedConfig ? savedConfig.api_url : ''),
+    apiKey: clientParams.apiKey || ''
+  };
+
+  if (resolved.apiKey === '••••••••' || resolved.apiKey === '') {
+    resolved.apiKey = savedConfig ? savedConfig.api_key : '';
+  }
+
+  return { ...clientParams, ...resolved };
+}
+
 // Helper to parse cookies
 function parseCookies(req) {
   const list = {};
@@ -1500,10 +1518,55 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // GET /api/ai/config - Obtener configuración de IA del usuario (enmascarada)
+    if (req.method === 'GET' && cleanUrl === '/api/ai/config') {
+      const savedConfig = UserAiConfigRepository.getUserConfig(session.user_id);
+      if (savedConfig) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          provider: savedConfig.provider,
+          model: savedConfig.model,
+          apiKey: savedConfig.api_key ? '••••••••' : '',
+          apiUrl: savedConfig.api_url
+        }));
+      } else {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          provider: 'gemini',
+          model: 'gemini-1.5-flash',
+          apiKey: '',
+          apiUrl: ''
+        }));
+      }
+      return;
+    }
+
+    // POST /api/ai/config - Guardar configuración de IA del usuario
+    if (req.method === 'POST' && cleanUrl === '/api/ai/config') {
+      try {
+        const payload = await readJsonBody(req);
+        if (!payload.provider) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'El proveedor es obligatorio.' }));
+          return;
+        }
+
+        UserAiConfigRepository.saveUserConfig(session.user_id, payload);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        console.error('Error al guardar config de IA:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
     // POST /api/ai/generate - AI Proxy
     if (req.method === 'POST' && cleanUrl === '/api/ai/generate') {
       try {
-        const params = await readJsonBody(req);
+        const clientParams = await readJsonBody(req);
+        const params = resolveAiParams(session.user_id, clientParams);
         if (!params.prompt && params.mode !== 'query_suggest') {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'El campo "prompt" es obligatorio.' }));
@@ -1531,7 +1594,8 @@ const server = http.createServer(async (req, res) => {
     // POST /api/ai/document - AI Document Generator
     if (req.method === 'POST' && cleanUrl === '/api/ai/document') {
       try {
-        const params = await readJsonBody(req);
+        const clientParams = await readJsonBody(req);
+        const params = resolveAiParams(session.user_id, clientParams);
         const requiresApiKey = ['gemini', 'openai'].includes(params.provider);
         if (requiresApiKey && !params.apiKey) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1554,7 +1618,8 @@ const server = http.createServer(async (req, res) => {
     // POST /api/ai/models - Obtener lista de modelos para un proveedor
     if (req.method === 'POST' && cleanUrl === '/api/ai/models') {
       try {
-        const params = await readJsonBody(req);
+        const clientParams = await readJsonBody(req);
+        const params = resolveAiParams(session.user_id, clientParams);
         if (!params.provider) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'El proveedor es obligatorio.' }));
@@ -1581,7 +1646,8 @@ const server = http.createServer(async (req, res) => {
     // POST /api/ai/test-connection - Probar conexión con el proveedor de IA
     if (req.method === 'POST' && cleanUrl === '/api/ai/test-connection') {
       try {
-        const params = await readJsonBody(req);
+        const clientParams = await readJsonBody(req);
+        const params = resolveAiParams(session.user_id, clientParams);
         if (!params.provider) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'El proveedor es obligatorio.' }));

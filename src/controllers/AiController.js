@@ -14,6 +14,8 @@ export class AiController {
 
   init() {
     this.setupAiModal();
+    // Sincronizar y enmascarar la configuración del servidor en segundo plano
+    AiService.fetchConfigFromServer().catch(err => console.error("Error al inicializar la configuración de IA:", err));
   }
 
   setupAiModal() {
@@ -271,8 +273,8 @@ export class AiController {
       });
     }
 
-    const openConfigModal = () => {
-      const config = AiService.loadConfig();
+    const openConfigModal = async () => {
+      const config = await AiService.fetchConfigFromServer();
       if (selectProvider) selectProvider.value = config.provider;
       if (inputModel) inputModel.value = config.model;
       if (inputApiKey) inputApiKey.value = config.apiKey;
@@ -665,7 +667,7 @@ export class AiController {
 
     // Save Config
     if (btnSaveConfig) {
-      btnSaveConfig.addEventListener("click", () => {
+      btnSaveConfig.addEventListener("click", async () => {
         const config = {
           provider: selectProvider.value,
           model: inputModel.value.trim(),
@@ -685,9 +687,20 @@ export class AiController {
           return;
         }
 
-        AiService.saveConfig(config);
-        this.uiManager.showToast("Configuración de IA guardada.", "success");
-        this.uiManager.closeAiModal(modal);
+        btnSaveConfig.disabled = true;
+        const originalText = btnSaveConfig.textContent;
+        btnSaveConfig.textContent = "Guardando...";
+
+        try {
+          await AiService.saveConfig(config);
+          this.uiManager.showToast("Configuración de IA guardada.", "success");
+          this.uiManager.closeAiModal(modal);
+        } catch (err) {
+          this.uiManager.showToast("Error al guardar configuración: " + err.message, "error");
+        } finally {
+          btnSaveConfig.disabled = false;
+          btnSaveConfig.textContent = originalText;
+        }
       });
     }
 

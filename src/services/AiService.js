@@ -24,13 +24,46 @@ export class AiService {
     return this.getDefaultConfig();
   }
 
-  static saveConfig(config) {
+  static async fetchConfigFromServer() {
     try {
-      localStorage.setItem(this.CONFIG_KEY, JSON.stringify(config));
+      const response = await fetch('/api/ai/config');
+      if (response.ok) {
+        const config = await response.json();
+        localStorage.setItem(this.CONFIG_KEY, JSON.stringify(config));
+        return config;
+      }
+    } catch (e) {
+      console.error('Error al cargar config de IA desde servidor:', e);
+    }
+    return this.loadConfig();
+  }
+
+  static async saveConfig(config) {
+    try {
+      // 1. Guardar en el servidor de forma segura
+      const response = await fetch('/api/ai/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(config)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      // 2. Enmascarar la clave en localStorage localmente para no exponerla en el navegador
+      const maskedConfig = {
+        ...config,
+        apiKey: config.apiKey ? '••••••••' : ''
+      };
+      localStorage.setItem(this.CONFIG_KEY, JSON.stringify(maskedConfig));
       return true;
     } catch (e) {
       console.error('Error al guardar configuración de IA:', e);
-      return false;
+      throw e;
     }
   }
 
