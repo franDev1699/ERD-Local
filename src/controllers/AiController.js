@@ -516,6 +516,14 @@ export class AiController {
       });
     }
 
+    const btnCloseLoadingOverlay = document.getElementById("btn-close-ai-loading-overlay");
+    if (btnCloseLoadingOverlay) {
+      btnCloseLoadingOverlay.addEventListener("click", () => {
+        const overlay = document.getElementById("ai-loading-overlay");
+        if (overlay) overlay.classList.add("hidden");
+      });
+    }
+
     // Toggle provider fields helper
     function toggleProviderFields(provider) {
       const apiKeyGroup = document.getElementById("ai-apikey-group");
@@ -835,6 +843,16 @@ export class AiController {
           if (window.lucide) window.lucide.createIcons();
         }
 
+        const overlay = document.getElementById("ai-loading-overlay");
+        const overlayStatus = document.getElementById("ai-loading-overlay-status");
+        if (overlay) {
+          overlay.classList.remove("hidden");
+          overlay.style.display = "flex";
+        }
+        if (overlayStatus) {
+          overlayStatus.textContent = `Conectando con ${config.provider}...`;
+        }
+
         try {
           const mode = selectMode ? selectMode.value : "replace";
           const currentState = this.stateManager.getState();
@@ -1118,6 +1136,10 @@ export class AiController {
           btnGenerate.disabled = false;
           btnGenerate.innerHTML = `<i data-lucide="sparkles" style="width: 14px; height: 14px; margin-right: 6px;"></i> Generar Diagrama con IA`;
           if (window.lucide) window.lucide.createIcons();
+          const overlay = document.getElementById("ai-loading-overlay");
+          if (overlay) {
+            overlay.classList.add("hidden");
+          }
         }
       });
     }
@@ -1145,6 +1167,16 @@ export class AiController {
     }
 
     this.uiManager.showToast("Organizando lienzo con IA...", "info");
+
+    const overlay = document.getElementById("ai-loading-overlay");
+    const overlayStatus = document.getElementById("ai-loading-overlay-status");
+    if (overlay) {
+      overlay.classList.remove("hidden");
+      overlay.style.display = "flex";
+    }
+    if (overlayStatus) {
+      overlayStatus.textContent = "Conectando con el proxy de IA...";
+    }
 
     try {
       const layoutPrompt = "Organiza las posiciones de las tablas y grupos del diagrama actual de manera lógica, limpia y balanceada. Agrupa físicamente las tablas que tengan relaciones entre sí. Conserva los campos, nombres y relaciones existentes, y solo ajusta las posiciones (x, y) de las tablas y de los grupos, y las dimensiones (width, height) de los grupos.";
@@ -1211,6 +1243,10 @@ export class AiController {
       if (btnAutoLayout) {
         btnAutoLayout.disabled = false;
         btnAutoLayout.innerHTML = originalHtml;
+      }
+      const overlay = document.getElementById("ai-loading-overlay");
+      if (overlay) {
+        overlay.classList.add("hidden");
       }
     }
   }
