@@ -516,11 +516,29 @@ export class AiController {
       });
     }
 
-    const btnCloseLoadingOverlay = document.getElementById("btn-close-ai-loading-overlay");
-    if (btnCloseLoadingOverlay) {
-      btnCloseLoadingOverlay.addEventListener("click", () => {
-        const overlay = document.getElementById("ai-loading-overlay");
-        if (overlay) overlay.classList.add("hidden");
+    const panel = document.getElementById("ai-loading-panel");
+    const btnMinimizePanel = document.getElementById("btn-minimize-ai-panel");
+    const btnClosePanel = document.getElementById("btn-close-ai-panel");
+    const panelBody = document.getElementById("ai-loading-panel-body");
+    const iconMinimize = document.getElementById("icon-ai-panel-minimize");
+
+    if (btnMinimizePanel && panelBody && iconMinimize) {
+      btnMinimizePanel.addEventListener("click", () => {
+        panelBody.classList.toggle("hidden");
+        if (panelBody.classList.contains("hidden")) {
+          iconMinimize.setAttribute("data-lucide", "chevron-up");
+        } else {
+          iconMinimize.setAttribute("data-lucide", "chevron-down");
+        }
+        if (window.lucide) window.lucide.createIcons();
+      });
+    }
+
+    if (btnClosePanel && panel) {
+      btnClosePanel.addEventListener("click", () => {
+        panel.classList.add("hidden");
+        if (panelBody) panelBody.classList.remove("hidden");
+        if (iconMinimize) iconMinimize.setAttribute("data-lucide", "chevron-down");
       });
     }
 
@@ -843,14 +861,13 @@ export class AiController {
           if (window.lucide) window.lucide.createIcons();
         }
 
-        const overlay = document.getElementById("ai-loading-overlay");
-        const overlayStatus = document.getElementById("ai-loading-overlay-status");
-        if (overlay) {
-          overlay.classList.remove("hidden");
-          overlay.style.display = "flex";
+        const panel = document.getElementById("ai-loading-panel");
+        const panelStatus = document.getElementById("ai-loading-overlay-status");
+        if (panel) {
+          panel.classList.remove("hidden");
         }
-        if (overlayStatus) {
-          overlayStatus.textContent = `Conectando con ${config.provider}...`;
+        if (panelStatus) {
+          panelStatus.textContent = `Conectando con ${config.provider}...`;
         }
 
         try {
@@ -1136,9 +1153,9 @@ export class AiController {
           btnGenerate.disabled = false;
           btnGenerate.innerHTML = `<i data-lucide="sparkles" style="width: 14px; height: 14px; margin-right: 6px;"></i> Generar Diagrama con IA`;
           if (window.lucide) window.lucide.createIcons();
-          const overlay = document.getElementById("ai-loading-overlay");
-          if (overlay) {
-            overlay.classList.add("hidden");
+          const panel = document.getElementById("ai-loading-panel");
+          if (panel) {
+            panel.classList.add("hidden");
           }
         }
       });
@@ -1168,14 +1185,13 @@ export class AiController {
 
     this.uiManager.showToast("Organizando lienzo con IA...", "info");
 
-    const overlay = document.getElementById("ai-loading-overlay");
-    const overlayStatus = document.getElementById("ai-loading-overlay-status");
-    if (overlay) {
-      overlay.classList.remove("hidden");
-      overlay.style.display = "flex";
+    const panel = document.getElementById("ai-loading-panel");
+    const panelStatus = document.getElementById("ai-loading-overlay-status");
+    if (panel) {
+      panel.classList.remove("hidden");
     }
-    if (overlayStatus) {
-      overlayStatus.textContent = "Conectando con el proxy de IA...";
+    if (panelStatus) {
+      panelStatus.textContent = "Conectando con el proxy de IA...";
     }
 
     try {
@@ -1244,9 +1260,9 @@ export class AiController {
         btnAutoLayout.disabled = false;
         btnAutoLayout.innerHTML = originalHtml;
       }
-      const overlay = document.getElementById("ai-loading-overlay");
-      if (overlay) {
-        overlay.classList.add("hidden");
+      const panel = document.getElementById("ai-loading-panel");
+      if (panel) {
+        panel.classList.add("hidden");
       }
     }
   }

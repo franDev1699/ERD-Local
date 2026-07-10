@@ -861,15 +861,22 @@
 			</div>
 		</div>
 
-		<!-- AI Progress Loading Overlay -->
-		<div id="ai-loading-overlay" class="modal hidden" style="z-index: 2000; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;">
-			<div class="modal-content" style="max-width: 420px; border: 1px solid var(--color-border); background-color: var(--color-bg-sidebar); border-radius: 12px; padding: 25px; box-shadow: var(--shadow-lg); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 15px;">
-				<div class="spinner-loader" style="width: 32px; height: 32px; border-width: 3px; border-color: var(--color-primary) transparent var(--color-primary) transparent;"></div>
-				<h3 style="font-size: 1.1rem; font-weight: 700; margin: 0; color: var(--color-text-main);">Procesando con IA</h3>
-				<p id="ai-loading-overlay-status" style="font-size: 0.85rem; color: var(--color-text-muted); margin: 0; min-height: 40px; display: flex; align-items: center; justify-content: center;">
+		<!-- AI Progress Panel -->
+		<div id="ai-loading-panel" class="hidden" style="z-index: 2000; position: fixed; bottom: 20px; right: 20px; width: 320px; background-color: var(--color-bg-sidebar); border: 1px solid var(--color-border); border-radius: 12px; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden; transition: all 0.3s ease;">
+			<div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary); cursor: pointer;" id="ai-loading-panel-header">
+				<div style="display: flex; align-items: center; gap: 8px;">
+					<div class="spinner-loader" style="width: 16px; height: 16px; border-width: 2px; border-color: var(--color-primary) transparent var(--color-primary) transparent;"></div>
+					<h3 style="font-size: 0.9rem; font-weight: 600; margin: 0; color: var(--color-text-main);">Procesando con IA</h3>
+				</div>
+				<div style="display: flex; gap: 5px;">
+					<button id="btn-minimize-ai-panel" style="background: none; border: none; color: var(--color-text-muted); cursor: pointer; padding: 2px;" title="Minimizar/Maximizar"><i data-lucide="chevron-down" id="icon-ai-panel-minimize" style="width: 16px; height: 16px;"></i></button>
+					<button id="btn-close-ai-panel" style="background: none; border: none; color: var(--color-text-muted); cursor: pointer; padding: 2px;" title="Cerrar Panel"><i data-lucide="x" style="width: 16px; height: 16px;"></i></button>
+				</div>
+			</div>
+			<div id="ai-loading-panel-body" style="padding: 15px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+				<p id="ai-loading-overlay-status" style="font-size: 0.85rem; color: var(--color-text-muted); margin: 0; min-height: 20px; display: flex; align-items: center; justify-content: center;">
 					Conectando con el servicio...
 				</p>
-				<button id="btn-close-ai-loading-overlay" class="btn btn-secondary" style="padding: 6px 16px; border-radius: 6px; font-size: 0.8rem; cursor: pointer; border: 1px solid var(--color-border);">Ocultar</button>
 			</div>
 		</div>
 
