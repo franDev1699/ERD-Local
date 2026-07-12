@@ -801,10 +801,42 @@ export class SidebarEditor {
 
     editorEl.appendChild(colorGroup);
 
+    // Grid configuration for Group Layout
+    const gridConfigGroup = document.createElement("div");
+    gridConfigGroup.className = "form-group";
+    gridConfigGroup.style.marginTop = "5px";
+    gridConfigGroup.innerHTML = `
+      <label>Configuración de Grid (Layout)</label>
+      <div style="display: flex; gap: 10px; margin-top: 5px;">
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+          <span style="font-size: 0.75rem; color: var(--color-text-muted);">Columnas</span>
+          <input type="number" min="0" placeholder="Auto" class="edit-group-cols-input" value="${group.layoutCols !== undefined && group.layoutCols !== null ? group.layoutCols : ''}" style="width: 100%;" />
+        </div>
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+          <span style="font-size: 0.75rem; color: var(--color-text-muted);">Filas</span>
+          <input type="number" min="0" placeholder="Auto" class="edit-group-rows-input" value="${group.layoutRows !== undefined && group.layoutRows !== null ? group.layoutRows : ''}" style="width: 100%;" />
+        </div>
+      </div>
+    `;
+
+    const colsInput = gridConfigGroup.querySelector(".edit-group-cols-input");
+    colsInput.addEventListener("change", (e) => {
+      const val = parseInt(e.target.value, 10);
+      this.onGroupUpdate(group.id, { layoutCols: isNaN(val) || val <= 0 ? null : val });
+    });
+
+    const rowsInput = gridConfigGroup.querySelector(".edit-group-rows-input");
+    rowsInput.addEventListener("change", (e) => {
+      const val = parseInt(e.target.value, 10);
+      this.onGroupUpdate(group.id, { layoutRows: isNaN(val) || val <= 0 ? null : val });
+    });
+
+    editorEl.appendChild(gridConfigGroup);
+
     // Delete Group Button
     const deleteGroupBtn = document.createElement("button");
     deleteGroupBtn.className = "btn btn-danger-outline btn-full";
-    deleteGroupBtn.style.marginTop = "20px";
+    deleteGroupBtn.style.marginTop = "10px";
     deleteGroupBtn.innerHTML = `<i data-lucide="trash-2"></i> Eliminar Grupo`;
     deleteGroupBtn.addEventListener("click", () => {
       this.onGroupDelete(group.id);

@@ -61,7 +61,8 @@ export class AppController {
     });
 
     this.renderer = new Renderer(config.dom, {
-      onRelationshipDelete: (id) => this.diagramController.deleteRelationship(id)
+      onRelationshipDelete: (id) => this.diagramController.deleteRelationship(id),
+      onRelationshipCardinalityChange: (id, cardinality) => this.diagramController.updateRelationshipCardinality(id, cardinality)
     });
 
     this.sidebarEditor = new SidebarEditor({

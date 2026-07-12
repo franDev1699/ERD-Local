@@ -10,6 +10,7 @@ export class Renderer {
   constructor(domElements, config = {}) {
     this.elements = domElements;
     this.onRelationshipDelete = config.onRelationshipDelete;
+    this.onRelationshipCardinalityChange = config.onRelationshipCardinalityChange;
     this.zoom = 1.0;
 
     // Cache: maps tableId -> DOM element for O(1) lookups
@@ -188,9 +189,9 @@ export class Renderer {
   renderConnections(relationships) {
     const { connectionsSvg } = this.elements;
 
-    // Remove old connection paths
-    const oldPaths = connectionsSvg.querySelectorAll(".connection-path, .connection-path-glow, .connection-path-hit");
-    oldPaths.forEach(p => p.remove());
+    // Remove old connection groups (each <g> contains paths + labels)
+    const oldGroups = connectionsSvg.querySelectorAll("g[data-id]");
+    oldGroups.forEach(g => g.remove());
 
     const TABLE_WIDTH = 240;
 
@@ -226,10 +227,23 @@ export class Renderer {
       let fromSide, toSide;
 
       // Determine optimal sides based on relative positions
+      const horizontalGap = Math.min(
+        Math.abs(fb.left - tb.right),
+        Math.abs(tb.left - fb.right)
+      );
       const noOverlapX = fb.right + 10 < tb.left || tb.right + 10 < fb.left;
 
       if (noOverlapX) {
         // Tables clearly separated horizontally
+        if (fb.centerX < tb.centerX) {
+          fromSide = "right";
+          toSide = "left";
+        } else {
+          fromSide = "left";
+          toSide = "right";
+        }
+      } else if (horizontalGap > 80) {
+        // Close but not overlapping — prefer same-side routing through the gap
         if (fb.centerX < tb.centerX) {
           fromSide = "right";
           toSide = "left";
@@ -249,7 +263,6 @@ export class Renderer {
         const toLeftLoad = portLoad.get(toLeftKey) || 0;
         const toRightLoad = portLoad.get(toRightKey) || 0;
 
-        // Prefer routing both to the same side (left or right) that has less total load
         const leftTotal = fromLeftLoad + toLeftLoad;
         const rightTotal = fromRightLoad + toRightLoad;
 
@@ -284,16 +297,19 @@ export class Renderer {
         fromIndex, toIndex,
         fromTable: rel.fromTable,
         toTable: rel.toTable,
-        customChannelX: rel.customChannelX
+        customChannelX: rel.customChannelX,
+        cardinality: rel.cardinality || '1:N'
       });
     });
 
     // Phase 3: Calculate channel positions and draw clean H-V-H paths
     const CORNER_RADIUS = 8;
     const CHANNEL_STAGGER = 14;
+    const CHANNEL_SNAP_THRESHOLD = 10;
 
     // Track channels per table-pair for staggering vertical segments
     const pairChannelCount = new Map();
+    const allChannelXs = [];
 
     resolvedRels.forEach(r => {
       const { start, end, fromSide, toSide, fromIndex, toIndex } = r;
@@ -328,8 +344,16 @@ export class Renderer {
         }
       }
 
+      for (const existing of allChannelXs) {
+        if (Math.abs(channelX - existing) < CHANNEL_SNAP_THRESHOLD) {
+          channelX = existing;
+          break;
+        }
+      }
+      allChannelXs.push(channelX);
+
       const d = this._buildOrthogonalPath(start.x, start.y, end.x, end.y, channelX, CORNER_RADIUS);
-      this._drawConnectionPath(d, r.id);
+      this._drawConnectionPath(d, r.id, r.cardinality, start, end, fromSide, toSide);
     });
   }
 
@@ -389,7 +413,7 @@ export class Renderer {
     ].join(' ');
   }
 
-  _drawConnectionPath(d, relationshipId) {
+  _drawConnectionPath(d, relationshipId, cardinality, start, end, fromSide, toSide) {
     const { connectionsSvg } = this.elements;
     const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
     group.dataset.id = relationshipId;
@@ -422,10 +446,104 @@ export class Renderer {
       }
     });
 
+    hitPath.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._showCardinalityPopover(relationshipId, e.clientX, e.clientY);
+    });
+
     group.appendChild(hitPath);
     group.appendChild(glowPath);
     group.appendChild(mainPath);
+
+    if (cardinality) {
+      const parts = cardinality.split(':');
+      const fromLabel = parts[0] || '1';
+      const toLabel = parts[1] || 'N';
+
+      const labelGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      labelGroup.className.baseVal = "connection-label-group";
+      labelGroup.dataset.id = relationshipId;
+
+      const OFFSET = 14;
+      const fromOffsetX = fromSide === 'right' ? -OFFSET : OFFSET;
+      const toOffsetX = toSide === 'right' ? -OFFSET : OFFSET;
+
+      const fromText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      fromText.setAttribute("x", start.x + fromOffsetX);
+      fromText.setAttribute("y", start.y - 6);
+      fromText.setAttribute("text-anchor", fromSide === 'right' ? 'end' : 'start');
+      fromText.className.baseVal = "connection-label connection-label-from";
+      fromText.textContent = fromLabel;
+
+      const toText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      toText.setAttribute("x", end.x + toOffsetX);
+      toText.setAttribute("y", end.y - 6);
+      toText.setAttribute("text-anchor", toSide === 'right' ? 'end' : 'start');
+      toText.className.baseVal = "connection-label connection-label-to";
+      toText.textContent = toLabel;
+
+      labelGroup.appendChild(fromText);
+      labelGroup.appendChild(toText);
+      group.appendChild(labelGroup);
+    }
+
     connectionsSvg.appendChild(group);
+  }
+
+  _showCardinalityPopover(relationshipId, clientX, clientY) {
+    const existing = document.querySelector(".cardinality-popover");
+    if (existing) existing.remove();
+
+    const popover = document.createElement("div");
+    popover.className = "cardinality-popover";
+
+    const options = [
+      { value: '1:1', label: '1 a 1' },
+      { value: '1:N', label: '1 a N' },
+      { value: 'N:1', label: 'N a 1' },
+      { value: 'N:M', label: 'N a M' }
+    ];
+
+    popover.innerHTML = `
+      <div class="cardinality-popover-header">
+        <span>Cardinalidad</span>
+        <button class="cardinality-popover-close">&times;</button>
+      </div>
+      <div class="cardinality-popover-body">
+        ${options.map(opt => `
+          <button class="cardinality-option" data-value="${opt.value}">${opt.label}</button>
+        `).join('')}
+      </div>
+    `;
+
+    popover.style.left = `${clientX + 10}px`;
+    popover.style.top = `${clientY - 10}px`;
+
+    document.body.appendChild(popover);
+
+    const close = () => popover.remove();
+
+    popover.querySelector('.cardinality-popover-close').addEventListener('click', close);
+
+    popover.querySelectorAll('.cardinality-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (this.onRelationshipCardinalityChange) {
+          this.onRelationshipCardinalityChange(relationshipId, btn.dataset.value);
+        }
+        close();
+      });
+    });
+
+    setTimeout(() => {
+      const handler = (e) => {
+        if (!popover.contains(e.target)) {
+          close();
+          document.removeEventListener('mousedown', handler);
+        }
+      };
+      document.addEventListener('mousedown', handler);
+    }, 0);
   }
 
   getPortCenter(portEl) {

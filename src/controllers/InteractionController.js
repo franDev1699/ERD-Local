@@ -394,19 +394,39 @@ export class InteractionController {
         const mouseX = (e.clientX - rect.left) / zoom;
 
         const dx = mouseX - this.draggedRelationshipStartCoords.mouseX;
-        const newChannelX = this.draggedRelationshipStartCoords.startX + dx;
+        let newChannelX = this.draggedRelationshipStartCoords.startX + dx;
 
         if (Math.abs(dx) > 3) {
           this.isDraggingRelationship = true;
         }
 
         if (this.isDraggingRelationship) {
+          const SNAP_THRESHOLD = 8;
+          const state = this.stateManager.getState();
+          const otherChannels = [];
+
+          state.relationships.forEach(rel => {
+            if (rel.id === this.draggedRelationshipId) return;
+            if (rel.customChannelX !== undefined && rel.customChannelX !== null) {
+              otherChannels.push(rel.customChannelX);
+            }
+          });
+
+          for (const cx of otherChannels) {
+            if (Math.abs(newChannelX - cx) < SNAP_THRESHOLD) {
+              newChannelX = cx;
+              break;
+            }
+          }
+
           const { x1, y1, x2, y2 } = this.draggedRelationshipStartCoords;
           const r = 8;
           const d = this.renderer._buildOrthogonalPath(x1, y1, x2, y2, newChannelX, r);
 
           const paths = this.dom.connectionsSvg.querySelectorAll(`[data-id="${this.draggedRelationshipId}"]`);
-          paths.forEach(p => p.setAttribute("d", d));
+          paths.forEach(p => {
+            if (p.tagName === 'path') p.setAttribute("d", d);
+          });
         }
       }
 
@@ -565,7 +585,23 @@ export class InteractionController {
           const mouseX = (e.clientX - rect.left) / zoom;
 
           const dx = mouseX - this.draggedRelationshipStartCoords.mouseX;
-          const newChannelX = this.draggedRelationshipStartCoords.startX + dx;
+          let newChannelX = this.draggedRelationshipStartCoords.startX + dx;
+
+          const SNAP_THRESHOLD = 8;
+          const state = this.stateManager.getState();
+          const otherChannels = [];
+          state.relationships.forEach(rel => {
+            if (rel.id === this.draggedRelationshipId) return;
+            if (rel.customChannelX !== undefined && rel.customChannelX !== null) {
+              otherChannels.push(rel.customChannelX);
+            }
+          });
+          for (const cx of otherChannels) {
+            if (Math.abs(newChannelX - cx) < SNAP_THRESHOLD) {
+              newChannelX = cx;
+              break;
+            }
+          }
 
           const paths = this.dom.connectionsSvg.querySelectorAll(`[data-id="${this.draggedRelationshipId}"]`);
           paths.forEach(p => {

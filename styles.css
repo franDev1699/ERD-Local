@@ -692,6 +692,87 @@ input[type="text"]:focus, select:focus {
   stroke-dasharray: 4,4;
 }
 
+.connection-label {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--color-text-secondary, #8b95a5);
+  pointer-events: none;
+  user-select: none;
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+
+.connection-label-from {
+  opacity: 0.85;
+}
+
+.connection-label-to {
+  opacity: 0.85;
+}
+
+.connection-path-hit:hover ~ .connection-label-group .connection-label {
+  fill: var(--color-danger-light);
+}
+
+.cardinality-popover {
+  position: fixed;
+  z-index: 10000;
+  background: var(--color-bg-secondary, #1e2330);
+  border: 1px solid var(--color-border, #2d3548);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 140px;
+  overflow: hidden;
+}
+
+.cardinality-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--color-bg-tertiary, #252b3a);
+  border-bottom: 1px solid var(--color-border, #2d3548);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #8b95a5);
+}
+
+.cardinality-popover-close {
+  background: none;
+  border: none;
+  color: var(--color-text-muted, #5a6577);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.cardinality-popover-close:hover {
+  color: var(--color-text-primary, #e0e4ea);
+}
+
+.cardinality-popover-body {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.cardinality-option {
+  background: none;
+  border: none;
+  color: var(--color-text-primary, #e0e4ea);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 10px;
+  text-align: left;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.cardinality-option:hover {
+  background: var(--color-primary, #4a9eff);
+  color: white;
+}
+
 /* Tables Layout on Canvas */
 .tables-container {
   position: absolute;

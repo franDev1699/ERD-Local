@@ -403,16 +403,20 @@ function sendUserStatusLog(userId, message) {
   });
 }
 
-// Helper para realizar solicitudes de IA a los distintos proveedores de manera nativa con soporte para auto-continuar respuestas truncadas
 async function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds, userId, enableThinking }) {
-  let promptTemplate = '';
-  const prompts = AiPromptRepository.getPromptsForUser(userId);
-  if (mode === 'append') {
-    promptTemplate = prompts.mode_append;
-  } else if (mode === 'edit') {
-    promptTemplate = prompts.mode_edit;
-  } else if (mode === 'layout') {
-    promptTemplate = `Eres un diseñador de bases de datos experto. El usuario desea REORGANIZAR las posiciones y dimensiones de las tablas y grupos del diagrama para mejorar su legibilidad y estética.
+  let systemInstruction = '';
+  
+  if (mode === 'layout_group') {
+    systemInstruction = prompt;
+  } else {
+    let promptTemplate = '';
+    const prompts = AiPromptRepository.getPromptsForUser(userId);
+    if (mode === 'append') {
+      promptTemplate = prompts.mode_append;
+    } else if (mode === 'edit') {
+      promptTemplate = prompts.mode_edit;
+    } else if (mode === 'layout') {
+      promptTemplate = `Eres un diseñador de bases de datos experto. El usuario desea REORGANIZAR las posiciones y dimensiones de las tablas y grupos del diagrama para mejorar su legibilidad y estética.
 NO agregues, modifiques ni elimines ninguna tabla, campo, tipo ni relación. Solo debes ajustar las coordenadas (x, y) de las tablas y de los grupos, y las dimensiones (width, height) de los grupos.
 Agrupa físicamente cerca las tablas relacionadas, manteniendo un excelente espacio libre entre ellas.
 
@@ -435,53 +439,56 @@ Reglas importantes:
 importante: no use el pensamiento, ni pensamiento extendido.
 Estado actual del diagrama:
 {currentState}`;
-  } else if (mode === 'query_generate') {
-    promptTemplate = prompts.mode_query_generate;
-  } else if (mode === 'query_suggest') {
-    promptTemplate = prompts.mode_query_suggest;
-  } else if (mode === 'query_explain') {
-    promptTemplate = prompts.mode_query_explain;
-  } else {
-    promptTemplate = prompts.mode_create;
-  }
+    } else if (mode === 'query_generate') {
+      promptTemplate = prompts.mode_query_generate;
+    } else if (mode === 'query_suggest') {
+      promptTemplate = prompts.mode_query_suggest;
+    } else if (mode === 'query_explain') {
+      promptTemplate = prompts.mode_query_explain;
+    } else {
+      promptTemplate = prompts.mode_create;
+    }
 
-  const optimizedContext = ContextBuilder.build({
-    currentState,
-    prompt,
-    mode,
-    contextDepth,
-    currentQuerySql,
-    selectedTableIds
-  });
+    const optimizedContext = ContextBuilder.build({
+      currentState,
+      prompt,
+      mode,
+      contextDepth,
+      currentQuerySql,
+      selectedTableIds
+    });
 
-  let catalogInstruction = "";
-  if (optimizedContext.catalog && optimizedContext.catalog.length > 0) {
-    catalogInstruction = `\n\nOTRAS TABLAS EXISTENTES EN EL DIAGRAMA (Catálogo de referencia rápida. NO las modifiques ni agregues campos en ellas a menos que se te pida explícitamente):\n- ${optimizedContext.catalog.join('\n- ')}\n`;
-    delete optimizedContext.catalog;
-  }
+    let catalogInstruction = "";
+    if (optimizedContext.catalog && optimizedContext.catalog.length > 0) {
+      catalogInstruction = `\n\nOTRAS TABLAS EXISTENTES EN EL DIAGRAMA (Catálogo de referencia rápida. NO las modifiques ni agregues campos en ellas a menos que se te pida explícitamente):\n- ${optimizedContext.catalog.join('\n- ')}\n`;
+      delete optimizedContext.catalog;
+    }
 
-  const stateStr = JSON.stringify(optimizedContext);
-  const currentQuerySqlStr = currentQuerySql ? `\nConsulta SQL actual a modificar:\n${currentQuerySql}` : '';
+    const stateStr = JSON.stringify(optimizedContext);
+    const currentQuerySqlStr = currentQuerySql ? `\nConsulta SQL actual a modificar:\n${currentQuerySql}` : '';
 
-  let systemInstruction = (promptTemplate || '')
-    .replace(/{expectedSchemaText}/g, prompts.expectedSchemaText || '')
-    .replace(/{layoutRulesText}/g, prompts.layoutRulesText || '')
-    .replace(/{currentState}/g, stateStr)
-    .replace(/{engine}/g, engine || 'PostgreSQL')
-    .replace(/{currentQuerySql}/g, currentQuerySqlStr);
+    systemInstruction = (promptTemplate || '')
+      .replace(/{expectedSchemaText}/g, prompts.expectedSchemaText || '')
+      .replace(/{layoutRulesText}/g, prompts.layoutRulesText || '')
+      .replace(/{currentState}/g, stateStr)
+      .replace(/{engine}/g, engine || 'PostgreSQL')
+      .replace(/{currentQuerySql}/g, currentQuerySqlStr);
 
-  if (catalogInstruction) {
-    systemInstruction += catalogInstruction;
+    if (catalogInstruction) {
+      systemInstruction += catalogInstruction;
+    }
   }
 
   if (provider === 'gemini') {
     const geminiModel = model || 'gemini-1.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
     
+    const textPart = (mode === 'layout_group') ? systemInstruction : `Requerimiento del usuario: ${prompt}\n\nInstrucción del sistema: ${systemInstruction}`;
+    
     const requestBody = JSON.stringify({
       contents: [{
         parts: [{
-          text: `Requerimiento del usuario: ${prompt}\n\nInstrucción del sistema: ${systemInstruction}`
+          text: textPart
         }]
       }],
       generationConfig: {
@@ -547,7 +554,9 @@ Estado actual del diagrama:
     let attempts = 0;
     const maxAttempts = 3;
 
-    const messages = [
+    const messages = (mode === 'layout_group') ? [
+      { role: 'user', content: systemInstruction }
+    ] : [
       { role: 'system', content: systemInstruction },
       { role: 'user', content: prompt }
     ];
@@ -628,7 +637,9 @@ Estado actual del diagrama:
 
     const requestBody = JSON.stringify({
       model: model || 'llama3',
-      messages: [
+      messages: (mode === 'layout_group') ? [
+        { role: 'user', content: systemInstruction }
+      ] : [
         { role: 'system', content: systemInstruction },
         { role: 'user', content: prompt }
       ],
@@ -992,6 +1003,28 @@ function fetchModelsFromProvider({ provider, apiKey, apiUrl }) {
   });
 }
 
+// Valida si un color es un formato hexadecimal CSS válido (#ffffff)
+function isValidHexColor(color) {
+  return typeof color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(color);
+}
+
+// Genera un color HSL distribuido y lo convierte a Hexadecimal
+function getFallbackColor(index) {
+  const hue = (index * 137.5) % 360; // Distribución basada en el ángulo dorado
+  return hslToHex(hue, 65, 50);
+}
+
+function hslToHex(h, s, l) {
+  l /= 100;
+  const a = s * Math.min(l, 1 - l) / 100;
+  const f = n => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
 // Limpia posibles tags markdown del JSON devuelto por la IA
 function cleanJsonResponseText(text) {
   let cleaned = text.trim();
@@ -1060,6 +1093,55 @@ function resolveAiParams(userId, clientParams) {
   }
 
   return { ...clientParams, ...resolved };
+}
+
+async function executeLayoutGroupBatch(params, batchTables, batchRels, existingGroups, existingAssignments, userId) {
+  let existingGroupsSection = '';
+  if (existingGroups && existingGroups.length > 0) {
+    existingGroupsSection = `GRUPOS YA EXISTENTES (NO los modifiques, solo úsalos como referencia):\n${JSON.stringify(existingGroups)}\n\n`;
+  }
+
+  let existingAssignmentsSection = '';
+  if (existingAssignments && existingAssignments.length > 0) {
+    existingAssignmentsSection = `ASIGNACIONES EXISTENTES (RESPÉTALAS - NO cambies el groupId de estas tablas):\n${JSON.stringify(existingAssignments)}\n\n`;
+  }
+
+  const prompt = `${existingGroupsSection}${existingAssignmentsSection}TABLAS:
+${JSON.stringify(batchTables, null, 2)}
+
+RELACIONES:
+${JSON.stringify(batchRels, null, 2)}
+
+REGLAS CRÍTICAS:
+1. **RESPETA LAS ASIGNACIONES EXISTENTES**: Si una tabla ya tiene un groupId en "ASIGNACIONES EXISTENTES", DEBES mantener ese mismo groupId. NO la muevas a otro grupo.
+2. Solo asigna groupId a tablas que actualmente tienen groupId: null (sin grupo).
+3. Para tablas sin grupo, agrúpalas por dominio funcional usando las relaciones como señal principal.
+4. Una tabla puede quedar sin grupo (groupId: null) si no encaja claramente en ningún dominio. No fuerces agrupaciones artificiales.
+5. Cada grupo debe tener entre 2 y 12 tablas.
+6. Asigna a cada grupo un color hex que tenga relación semántica con el dominio funcional. Usa colores de saturación media, evita repetir colores idénticos.
+7. Nombra cada grupo con 2-4 palabras que describan el dominio, nunca genérico como "Grupo 1".
+8. Responde ÚNICAMENTE con este JSON, sin texto antes ni después, sin markdown, sin backticks:
+
+{
+  "groups": [
+    { "id": "g1", "name": "string", "color": "#hex" }
+  ],
+  "assignments": [
+    { "tableId": "string", "groupId": "g1_o_null" }
+  ]
+}
+
+9. El array "assignments" debe incluir exactamente una entrada por cada tabla recibida. Para tablas con asignación existente, usa el mismo groupId. Para tablas sin grupo, asigna un groupId nuevo o null.
+10. NO cambies el groupId de ninguna tabla que ya tenga uno asignado en "ASIGNACIONES EXISTENTES".`;
+
+  const requestParams = {
+    ...params,
+    prompt: prompt,
+    mode: 'layout_group',
+    userId: userId
+  };
+
+  return await makeAiRequest(requestParams);
 }
 
 // Helper to parse cookies
@@ -1729,6 +1811,170 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ success: true, data: finalResult }));
       } catch (err) {
         console.error('Error en Proxy de IA:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/ai/layout-group - Auto-Layout functional grouping stage
+    if (req.method === 'POST' && cleanUrl === '/api/ai/layout-group') {
+      try {
+        const clientParams = await readJsonBody(req);
+        const params = resolveAiParams(session.user_id, clientParams);
+        const requiresApiKey = ['gemini', 'openai'].includes(params.provider);
+        if (requiresApiKey && !params.apiKey) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'La API Key es obligatoria para proveedores Cloud.' }));
+          return;
+        }
+
+        let state = clientParams.currentState;
+        if (!state && clientParams.projectId) {
+          state = loadProjectState(clientParams.projectId);
+        }
+
+        if (!state || !Array.isArray(state.tables)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Estado del proyecto no válido o vacío.' }));
+          return;
+        }
+
+        const simplifiedTables = state.tables.map(t => ({ id: t.id, name: t.name, groupId: t.groupId || null }));
+        const simplifiedRelationships = (state.relationships || []).map(r => ({ from: r.fromTable, to: r.toTable }));
+        const existingGroups = state.groups || [];
+        // Extract existing table-to-group assignments (only tables that already have a groupId)
+        const existingAssignments = simplifiedTables
+          .filter(t => t.groupId)
+          .map(t => ({ tableId: t.id, groupId: t.groupId }));
+
+        const BATCH_SIZE = 20;
+        const batches = [];
+        for (let i = 0; i < simplifiedTables.length; i += BATCH_SIZE) {
+          batches.push(simplifiedTables.slice(i, i + BATCH_SIZE));
+        }
+
+        const allGroups = [...existingGroups];
+        const allAssignments = [];
+        // Inicializar con IDs de grupos existentes para que la IA los conozca y no cree duplicados
+        const existingGroupIds = new Set(existingGroups.map(g => g.id));
+        // Preservar asignaciones existentes como fallback si la IA falla
+        const preservedAssignments = new Map(existingAssignments.map(a => [a.tableId, a.groupId]));
+
+        for (let b = 0; b < batches.length; b++) {
+          const batchTables = batches[b];
+          const batchTableIds = new Set(batchTables.map(t => t.id));
+          const batchRels = simplifiedRelationships.filter(r => batchTableIds.has(r.from) || batchTableIds.has(r.to));
+
+          let batchResult;
+          try {
+            sendUserStatusLog(session.user_id, `Analizando agrupación para el lote ${b + 1} de ${batches.length}...`);
+            batchResult = await executeLayoutGroupBatch(params, batchTables, batchRels, allGroups, existingAssignments, session.user_id);
+          } catch (batchErr) {
+            console.error(`Error en lote ${b + 1}:`, batchErr.message);
+            // Fallback: preservar asignaciones existentes, no asignar null ciegamente
+            batchTables.forEach(t => {
+              if (preservedAssignments.has(t.id)) {
+                allAssignments.push({ tableId: t.id, groupId: preservedAssignments.get(t.id) });
+              } else {
+                allAssignments.push({ tableId: t.id, groupId: null });
+              }
+            });
+            continue;
+          }
+
+          // Parse and merge results - primero registrar TODOS los grupos del resultado
+          if (batchResult && Array.isArray(batchResult.groups)) {
+            batchResult.groups.forEach(g => {
+              if (g && g.id && g.name) {
+                let color = g.color;
+                if (!isValidHexColor(color)) {
+                  color = getFallbackColor(allGroups.length);
+                }
+                if (!existingGroupIds.has(g.id)) {
+                  existingGroupIds.add(g.id);
+                  allGroups.push({ id: g.id, name: g.name, color });
+                }
+              }
+            });
+          }
+
+          const assignmentsMap = new Map();
+          if (batchResult && Array.isArray(batchResult.assignments)) {
+            batchResult.assignments.forEach(asgn => {
+              if (asgn && asgn.tableId && batchTableIds.has(asgn.tableId)) {
+                // Si la tabla ya tenía una asignación existente, preservarla
+                if (preservedAssignments.has(asgn.tableId)) {
+                  assignmentsMap.set(asgn.tableId, preservedAssignments.get(asgn.tableId));
+                } else if (asgn.groupId) {
+                  assignmentsMap.set(asgn.tableId, asgn.groupId);
+                } else {
+                  assignmentsMap.set(asgn.tableId, null);
+                }
+                allAssignments.push({ tableId: asgn.tableId, groupId: assignmentsMap.get(asgn.tableId) });
+              }
+            });
+          }
+
+          // Check if any tables from this batch are missing in assignments
+          const missingTables = batchTables.filter(t => !assignmentsMap.has(t.id));
+          if (missingTables.length > 0) {
+            console.log(`Lote ${b + 1}: Faltan asignaciones para ${missingTables.length} tablas. Intentando batch reducido...`);
+            try {
+              sendUserStatusLog(session.user_id, `Reintentando asignación para ${missingTables.length} tablas pendientes...`);
+              const retryRels = simplifiedRelationships.filter(r => missingTables.some(mt => mt.id === r.from || mt.id === r.to));
+              const retryResult = await executeLayoutGroupBatch(params, missingTables, retryRels, allGroups, existingAssignments, session.user_id);
+
+              if (retryResult && Array.isArray(retryResult.groups)) {
+                retryResult.groups.forEach(g => {
+                  if (g && g.id && g.name) {
+                    let color = g.color;
+                    if (!isValidHexColor(color)) {
+                      color = getFallbackColor(allGroups.length);
+                    }
+                    if (!existingGroupIds.has(g.id)) {
+                      existingGroupIds.add(g.id);
+                      allGroups.push({ id: g.id, name: g.name, color });
+                    }
+                  }
+                });
+              }
+
+              if (retryResult && Array.isArray(retryResult.assignments)) {
+                retryResult.assignments.forEach(asgn => {
+                  if (asgn && asgn.tableId && missingTables.some(mt => mt.id === asgn.tableId)) {
+                    // Preservar asignaciones existentes incluso en retry
+                    if (preservedAssignments.has(asgn.tableId)) {
+                      assignmentsMap.set(asgn.tableId, preservedAssignments.get(asgn.tableId));
+                    } else if (asgn.groupId) {
+                      assignmentsMap.set(asgn.tableId, asgn.groupId);
+                    } else {
+                      assignmentsMap.set(asgn.tableId, null);
+                    }
+                    allAssignments.push({ tableId: asgn.tableId, groupId: assignmentsMap.get(asgn.tableId) });
+                  }
+                });
+              }
+            } catch (retryErr) {
+              console.error(`Error en reintento de lote ${b + 1}:`, retryErr.message);
+            }
+
+            // Fallback: preservar asignaciones existentes para tablas aún sin asignar
+            const finalMissing = batchTables.filter(t => !assignmentsMap.has(t.id));
+            finalMissing.forEach(t => {
+              if (preservedAssignments.has(t.id)) {
+                allAssignments.push({ tableId: t.id, groupId: preservedAssignments.get(t.id) });
+              } else {
+                allAssignments.push({ tableId: t.id, groupId: null });
+              }
+            });
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, groups: allGroups, assignments: allAssignments }));
+      } catch (err) {
+        console.error('Error en /api/ai/layout-group:', err.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }

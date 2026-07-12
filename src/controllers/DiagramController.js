@@ -1,4 +1,5 @@
 // src/controllers/DiagramController.js
+import { LayoutEngine } from '../core/LayoutEngine.js';
 
 export class DiagramController {
   constructor({ stateManager, history, uiManager, canvasManager, dom }) {
@@ -526,7 +527,8 @@ export class DiagramController {
         fromTable,
         fromField,
         toTable,
-        toField
+        toField,
+        cardinality: '1:N'
       });
       this.uiManager.showToast("Relación creada correctamente.", "success");
     } else {
@@ -540,6 +542,16 @@ export class DiagramController {
       this.history.push(this.stateManager.getState());
       this.stateManager.removeRelationship(relationshipId);
       this.uiManager.showToast("Relación eliminada.", "success");
+    }
+  }
+
+  updateRelationshipCardinality(relationshipId, cardinality) {
+    const state = this.stateManager.getState();
+    const rel = state.relationships.find(r => r.id === relationshipId);
+    if (rel) {
+      this.history.push(JSON.parse(JSON.stringify(state)));
+      this.stateManager.updateRelationship(relationshipId, { cardinality });
+      this.uiManager.showToast(`Cardinalidad cambiada a ${cardinality}.`, "success");
     }
   }
 
@@ -624,174 +636,52 @@ export class DiagramController {
     this.history.push(JSON.parse(JSON.stringify(state)));
 
     const groups = state.groups || [];
-    const groupIds = new Set(groups.map(g => g.id));
-
-    const estimateTableHeight = (table) => {
-      const fieldCount = table.fields ? table.fields.length : 0;
-      return 52 + (fieldCount * 32) + 16;
-    };
-
+    
+    // Stage 2: Layout each group grid locally
+    const relativeTablesMap = {};
     groups.forEach(group => {
       const groupTables = state.tables.filter(t => t.groupId === group.id);
-      if (groupTables.length === 0) {
-        group.width = group.width || 300;
-        group.height = group.height || 200;
-        return;
-      }
-
-      const paddingLeft = 40;
-      const paddingTop = 75;
-      const paddingRight = 40;
-      const paddingBottom = 40;
-      const gapX = 80;
-      const gapY = 80;
-      const tableWidth = 240;
-
-      const colCount = Math.ceil(Math.sqrt(groupTables.length));
-      const rowCount = Math.ceil(groupTables.length / colCount);
-
-      const rowHeights = [];
-      for (let r = 0; r < rowCount; r++) {
-        let maxH = 0;
-        for (let c = 0; c < colCount; c++) {
-          const idx = r * colCount + c;
-          if (idx < groupTables.length) {
-            maxH = Math.max(maxH, estimateTableHeight(groupTables[idx]));
-          }
-        }
-        rowHeights.push(maxH);
-      }
-
-      groupTables.forEach((table, index) => {
-        const col = index % colCount;
-        const row = Math.floor(index / colCount);
-
-        table.x = group.x + paddingLeft + col * (tableWidth + gapX);
-
-        let yOffset = paddingTop;
-        for (let r = 0; r < row; r++) {
-          yOffset += rowHeights[r] + gapY;
-        }
-        table.y = group.y + yOffset;
+      const layoutResult = LayoutEngine.layoutGroupGrid(groupTables, state.relationships || [], {
+        cols: group.layoutCols,
+        rows: group.layoutRows
       });
-
-      const totalWidth = paddingLeft + colCount * tableWidth + (colCount - 1) * gapX + paddingRight;
-      const totalHeight = paddingTop + rowHeights.reduce((sum, h) => sum + h, 0) + (rowCount - 1) * gapY + paddingBottom;
-
-      group.width = Math.max(group.width || 0, totalWidth);
-      group.height = Math.max(group.height || 0, totalHeight);
+      
+      group.width = layoutResult.groupWidth;
+      group.height = layoutResult.groupHeight;
+      relativeTablesMap[group.id] = layoutResult.tables;
     });
 
-    let startX = 100;
-    let startY = 100;
-    let maxGroupsAreaHeight = 0;
-    let maxGroupsAreaWidth = 0;
-
-    if (groups.length > 0) {
-      const groupsColCount = Math.ceil(Math.sqrt(groups.length));
-      const groupsRowCount = Math.ceil(groups.length / groupsColCount);
-      const gapGroupsX = 150;
-      const gapGroupsY = 150;
-
-      const colWidths = [];
-      const rowHeights = [];
-
-      for (let r = 0; r < groupsRowCount; r++) {
-        let maxRowH = 0;
-        for (let c = 0; c < groupsColCount; c++) {
-          const idx = r * groupsColCount + c;
-          if (idx < groups.length) {
-            maxRowH = Math.max(maxRowH, groups[idx].height || 200);
-          }
-        }
-        rowHeights.push(maxRowH);
-      }
-
-      for (let c = 0; c < groupsColCount; c++) {
-        let maxColW = 0;
-        for (let r = 0; r < groupsRowCount; r++) {
-          const idx = r * groupsColCount + c;
-          if (idx < groups.length) {
-            maxColW = Math.max(maxColW, groups[idx].width || 300);
-          }
-        }
-        colWidths.push(maxColW);
-      }
-
-      groups.forEach((group, index) => {
-        const col = index % groupsColCount;
-        const row = Math.floor(index / groupsColCount);
-
-        let targetX = startX;
-        for (let c = 0; c < col; c++) {
-          targetX += colWidths[c] + gapGroupsX;
-        }
-
-        let targetY = startY;
-        for (let r = 0; r < row; r++) {
-          targetY += rowHeights[r] + gapGroupsY;
-        }
-
-        const dx = targetX - group.x;
-        const dy = targetY - group.y;
-
-        group.x = targetX;
-        group.y = targetY;
-
-        state.tables.filter(t => t.groupId === group.id).forEach(table => {
-          table.x += dx;
-          table.y += dy;
-        });
-      });
-
-      maxGroupsAreaWidth = colWidths.reduce((sum, w) => sum + w, 0) + (groupsColCount - 1) * gapGroupsX;
-      maxGroupsAreaHeight = rowHeights.reduce((sum, h) => sum + h, 0) + (groupsRowCount - 1) * gapGroupsY;
-    }
-
+    // Stage 3: Shelf pack all groups and ungrouped tables
+    const groupIds = new Set(groups.map(g => g.id));
     const ungroupedTables = state.tables.filter(t => !t.groupId || !groupIds.has(t.groupId));
-    if (ungroupedTables.length > 0) {
-      let currentX = 100;
-      let currentY = 100;
+    const packingResult = LayoutEngine.shelfPackGroups(
+      groups,
+      ungroupedTables,
+      state.relationships || [],
+      relativeTablesMap
+    );
 
-      if (groups.length > 0) {
-        currentX = 100;
-        currentY = startY + maxGroupsAreaHeight + 200;
+    // Apply coordinates back to tables
+    const finalTables = state.tables.map(origTable => {
+      const packedTable = packingResult.tables.find(t => t.id === origTable.id);
+      if (packedTable) {
+        return {
+          ...origTable,
+          x: packedTable.x,
+          y: packedTable.y
+        };
       }
+      return origTable;
+    });
 
-      const colCount = Math.ceil(Math.sqrt(ungroupedTables.length));
-      const rowCount = Math.ceil(ungroupedTables.length / colCount);
+    this.stateManager.setState({
+      ...state,
+      tables: finalTables,
+      groups: packingResult.groups
+    });
 
-      const gapX = 100;
-      const gapY = 100;
-      const tableWidth = 240;
-
-      const rowHeights = [];
-      for (let r = 0; r < rowCount; r++) {
-        let maxH = 0;
-        for (let c = 0; c < colCount; c++) {
-          const idx = r * colCount + c;
-          if (idx < ungroupedTables.length) {
-            maxH = Math.max(maxH, estimateTableHeight(ungroupedTables[idx]));
-          }
-        }
-        rowHeights.push(maxH);
-      }
-
-      ungroupedTables.forEach((table, index) => {
-        const col = index % colCount;
-        const row = Math.floor(index / colCount);
-
-        table.x = currentX + col * (tableWidth + gapX);
-
-        let yOffset = 0;
-        for (let r = 0; r < row; r++) {
-          yOffset += rowHeights[r] + gapY;
-        }
-        table.y = currentY + yOffset;
-      });
-    }
-
-    this.centerContentOnCanvas(state.tables, state.groups);
+    const activeState = this.stateManager.getState();
+    this.centerContentOnCanvas(activeState.tables, activeState.groups);
 
     this.stateManager.notify();
     this.canvasManager.fitToContent(this.stateManager.getState().tables);

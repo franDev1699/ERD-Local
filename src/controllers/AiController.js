@@ -1,5 +1,6 @@
 // src/controllers/AiController.js
 import { AiService } from '../services/AiService.js';
+import { LayoutEngine } from '../core/LayoutEngine.js';
 
 export class AiController {
   constructor({ stateManager, uiManager, history, canvasManager, autoLayout, getSelectedTableIds, onTableSelect }) {
@@ -906,6 +907,36 @@ export class AiController {
             const fieldIdMap = {};
             const processedOriginalTableIds = new Set();
 
+            // Mapear grupos primero para tener el groupIdMap
+            const newGroups = [];
+            const groupIdMap = {};
+            if (result.groups && Array.isArray(result.groups)) {
+              result.groups.forEach(g => {
+                const originalGroup = currentGroups.find(og => og.id === g.id) ||
+                                      currentGroups.find(og => og.name.toLowerCase() === g.name.toLowerCase());
+                const finalGroupId = originalGroup ? originalGroup.id : (g.id || `group-ai-${Date.now()}-${Math.floor(Math.random() * 100)}`);
+                groupIdMap[g.id] = finalGroupId;
+
+                newGroups.push({
+                  id: finalGroupId,
+                  name: g.name,
+                  color: originalGroup ? originalGroup.color : (g.color || "#374151"),
+                  x: originalGroup ? originalGroup.x : (g.x || 100),
+                  y: originalGroup ? originalGroup.y : (g.y || 100),
+                  width: originalGroup ? originalGroup.width : (g.width || 300),
+                  height: originalGroup ? originalGroup.height : (g.height || 200)
+                });
+              });
+            }
+
+            // Conservar grupos antiguos que no se modificaron
+            currentGroups.forEach(cg => {
+              if (!newGroups.some(ng => ng.id === cg.id)) {
+                newGroups.push(cg);
+              }
+            });
+
+            // Mapear tablas usando groupIdMap
             result.tables.forEach(aiTable => {
               const originalTable = currentTables.find(t => t.id === aiTable.id) || 
                                     currentTables.find(t => t.name.toLowerCase() === aiTable.name.toLowerCase());
@@ -938,7 +969,14 @@ export class AiController {
                 });
               }
 
-              // Si la tabla existía, mantener sus coordenadas x, y (a menos que no estén definidas) y su groupId
+              // Resolver groupId mapeando el ID retornado por la IA al ID real
+              let finalGroupId = null;
+              if (aiTable.groupId) {
+                finalGroupId = groupIdMap[aiTable.groupId] || aiTable.groupId;
+              } else if (originalTable) {
+                finalGroupId = originalTable.groupId;
+              }
+
               newTables.push({
                 id: finalTableId,
                 name: aiTable.name,
@@ -946,7 +984,7 @@ export class AiController {
                 y: originalTable ? originalTable.y : (aiTable.y || 150),
                 fields: finalFields,
                 color: originalTable ? originalTable.color : (aiTable.color || "#6366f1"),
-                groupId: originalTable ? originalTable.groupId : (aiTable.groupId || null)
+                groupId: finalGroupId
               });
             });
 
@@ -996,31 +1034,6 @@ export class AiController {
               });
             }
 
-            // Mapear grupos
-            const newGroups = [];
-            if (result.groups && Array.isArray(result.groups)) {
-              result.groups.forEach(g => {
-                const originalGroup = currentGroups.find(og => og.id === g.id) ||
-                                      currentGroups.find(og => og.name.toLowerCase() === g.name.toLowerCase());
-                newGroups.push({
-                  id: originalGroup ? originalGroup.id : (g.id || `group-ai-${Date.now()}-${Math.floor(Math.random() * 100)}`),
-                  name: g.name,
-                  color: originalGroup ? originalGroup.color : (g.color || "#374151"),
-                  x: originalGroup ? originalGroup.x : (g.x || 100),
-                  y: originalGroup ? originalGroup.y : (g.y || 100),
-                  width: originalGroup ? originalGroup.width : (g.width || 300),
-                  height: originalGroup ? originalGroup.height : (g.height || 200)
-                });
-              });
-            }
-
-            // Conservar grupos antiguos que no se modificaron
-            currentGroups.forEach(cg => {
-              if (!newGroups.some(ng => ng.id === cg.id)) {
-                newGroups.push(cg);
-              }
-            });
-
             this.stateManager.setState({
               tables: newTables,
               relationships: newRelationships,
@@ -1036,7 +1049,31 @@ export class AiController {
 
             const tableIdMap = {};
             const fieldIdMap = {};
+            const groupIdMap = {};
 
+            // Mapear grupos primero para tener el groupIdMap
+            if (result.groups && Array.isArray(result.groups)) {
+              result.groups.forEach(g => {
+                const originalGroup = currentGroups.find(og => og.id === g.id) ||
+                                      currentGroups.find(og => og.name.toLowerCase() === g.name.toLowerCase());
+                const finalGroupId = originalGroup ? originalGroup.id : (g.id || `group-ai-${Date.now()}-${Math.floor(Math.random() * 100)}`);
+                groupIdMap[g.id] = finalGroupId;
+
+                if (!originalGroup) {
+                  currentGroups.push({
+                    id: finalGroupId,
+                    name: g.name,
+                    color: g.color || "#374151",
+                    x: g.x || 100,
+                    y: g.y || 100,
+                    width: g.width || 300,
+                    height: g.height || 200
+                  });
+                }
+              });
+            }
+
+            // Mapear tablas usando groupIdMap
             if (result.tables && Array.isArray(result.tables)) {
               result.tables.forEach(aiTable => {
                 const uniqueTableId = `tbl-ai-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -1061,6 +1098,12 @@ export class AiController {
                   });
                 }
 
+                // Resolver groupId con mapeo o dejar el retornado por la IA si es preexistente
+                let finalGroupId = null;
+                if (aiTable.groupId) {
+                  finalGroupId = groupIdMap[aiTable.groupId] || aiTable.groupId;
+                }
+
                 currentTables.push({
                   id: uniqueTableId,
                   name: aiTable.name,
@@ -1068,7 +1111,7 @@ export class AiController {
                   y: aiTable.y || 150,
                   fields: finalFields,
                   color: aiTable.color || "#10b981",
-                  groupId: aiTable.groupId || null
+                  groupId: finalGroupId
                 });
               });
             }
@@ -1092,21 +1135,6 @@ export class AiController {
               });
             }
 
-            // Mapear grupos nuevos en modo append
-            if (result.groups && Array.isArray(result.groups)) {
-              result.groups.forEach(g => {
-                currentGroups.push({
-                  id: g.id || `group-ai-${Date.now()}-${Math.floor(Math.random() * 100)}`,
-                  name: g.name,
-                  color: g.color || "#374151",
-                  x: g.x || 100,
-                  y: g.y || 100,
-                  width: g.width || 300,
-                  height: g.height || 200
-                });
-              });
-            }
-
             this.stateManager.setState({
               tables: currentTables,
               relationships: currentRelationships,
@@ -1126,7 +1154,7 @@ export class AiController {
                                         promptLower.includes("margen") ||
                                         promptLower.includes("orden");
 
-          if (mode === 'replace' || containsLayoutKeyword) {
+          if (mode === 'replace' || mode === 'append' || containsLayoutKeyword) {
             this.autoLayout();
           } else {
             this.stateManager.notify();
@@ -1195,62 +1223,122 @@ export class AiController {
     }
 
     try {
-      const layoutPrompt = "Organiza las posiciones de las tablas y grupos del diagrama actual de manera lógica, limpia y balanceada. Agrupa físicamente las tablas que tengan relaciones entre sí. Conserva los campos, nombres y relaciones existentes, y solo ajusta las posiciones (x, y) de las tablas y de los grupos, y las dimensiones (width, height) de los grupos.";
-      
-      const result = await AiService.generate(layoutPrompt, state, 'layout', { contextDepth: 'layout' });
+      const payload = {
+        provider: config.provider,
+        apiKey: config.apiKey,
+        apiUrl: config.apiUrl,
+        model: config.model,
+        enableThinking: !!config.enableThinking,
+        currentState: state
+      };
 
-      if (!result || !result.tables || !Array.isArray(result.tables)) {
-        throw new Error("El formato del resultado devuelto por la IA es inválido.");
+      if (panelStatus) {
+        panelStatus.textContent = "Agrupando tablas por dominio funcional...";
       }
 
-      // Mezclar ÚNICAMENTE coordenadas y pertenencia a grupos (groupId)
+      const response = await fetch('/api/ai/layout-group', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const resData = await response.json();
+      if (!resData.success || !Array.isArray(resData.groups) || !Array.isArray(resData.assignments)) {
+        throw new Error("El formato del resultado devuelto por el servidor es inválido.");
+      }
+
+      if (panelStatus) {
+        panelStatus.textContent = "Calculando coordenadas deterministas...";
+      }
+
+      // Merge new groups with existing ones to preserve custom settings
+      const updatedGroups = resData.groups.map(aiGroup => {
+        const existing = (state.groups || []).find(g => g.id === aiGroup.id);
+        return {
+          id: aiGroup.id,
+          name: aiGroup.name,
+          color: aiGroup.color,
+          layoutCols: existing ? existing.layoutCols : null,
+          layoutRows: existing ? existing.layoutRows : null,
+          x: 0,
+          y: 0,
+          width: 300,
+          height: 200
+        };
+      });
+
+      // Preserve existing table-to-group assignments - no cambiar grupos de tablas que ya tienen uno válido
+      const preservedGroupIds = new Map();
+      state.tables.forEach(t => {
+        if (t.groupId) {
+          preservedGroupIds.set(t.id, t.groupId);
+        }
+      });
+
       const updatedTables = state.tables.map(origTable => {
-        const aiTable = result.tables.find(t => t.id === origTable.id) || 
-                         result.tables.find(t => t.name.toLowerCase() === origTable.name.toLowerCase());
-        if (aiTable) {
-          return { 
-            ...origTable, 
-            x: aiTable.x !== undefined ? aiTable.x : origTable.x, 
-            y: aiTable.y !== undefined ? aiTable.y : origTable.y,
-            groupId: aiTable.groupId !== undefined ? aiTable.groupId : origTable.groupId
+        const asgn = resData.assignments.find(a => a.tableId === origTable.id);
+        // Si la tabla ya tenía grupo existente, preservarlo incluso si la IA sugiere otro
+        let finalGroupId = preservedGroupIds.has(origTable.id) ? preservedGroupIds.get(origTable.id) : (asgn ? asgn.groupId : null);
+        return {
+          ...origTable,
+          groupId: finalGroupId
+        };
+      });
+
+      // Stage 2: Layout each group grid locally
+      const relativeTablesMap = {};
+      updatedGroups.forEach(group => {
+        const groupTables = updatedTables.filter(t => t.groupId === group.id);
+        const layoutResult = LayoutEngine.layoutGroupGrid(groupTables, state.relationships || [], {
+          cols: group.layoutCols,
+          rows: group.layoutRows
+        });
+        
+        group.width = layoutResult.groupWidth;
+        group.height = layoutResult.groupHeight;
+        relativeTablesMap[group.id] = layoutResult.tables;
+      });
+
+      // Stage 3: Shelf pack all groups and ungrouped tables
+      const updatedGroupIds = new Set(updatedGroups.map(g => g.id));
+      const ungroupedTables = updatedTables.filter(t => !t.groupId || !updatedGroupIds.has(t.groupId));
+      const packingResult = LayoutEngine.shelfPackGroups(
+        updatedGroups,
+        ungroupedTables,
+        state.relationships || [],
+        relativeTablesMap
+      );
+
+      // Apply coordinates and group assignments back to original state tables
+      const finalTables = state.tables.map(origTable => {
+        const packedTable = packingResult.tables.find(t => t.id === origTable.id);
+        if (packedTable) {
+          return {
+            ...origTable,
+            x: packedTable.x,
+            y: packedTable.y,
+            groupId: packedTable.groupId
           };
         }
         return origTable;
       });
 
-      // Mezclar grupos
-      const updatedGroups = [...(state.groups || [])];
-      if (result.groups && Array.isArray(result.groups)) {
-        result.groups.forEach(aiGroup => {
-          const existingGroup = updatedGroups.find(g => g.id === aiGroup.id || g.name.toLowerCase() === aiGroup.name.toLowerCase());
-          if (existingGroup) {
-            existingGroup.x = aiGroup.x !== undefined ? aiGroup.x : existingGroup.x;
-            existingGroup.y = aiGroup.y !== undefined ? aiGroup.y : existingGroup.y;
-            existingGroup.width = aiGroup.width !== undefined ? aiGroup.width : existingGroup.width;
-            existingGroup.height = aiGroup.height !== undefined ? aiGroup.height : existingGroup.height;
-          } else {
-            updatedGroups.push({
-              id: aiGroup.id || `group-ai-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-              name: aiGroup.name,
-              color: aiGroup.color || "#374151",
-              x: aiGroup.x !== undefined ? aiGroup.x : 1500,
-              y: aiGroup.y !== undefined ? aiGroup.y : 1500,
-              width: aiGroup.width !== undefined ? aiGroup.width : 300,
-              height: aiGroup.height !== undefined ? aiGroup.height : 200
-            });
-          }
-        });
-      }
-
       this.history.push(JSON.parse(JSON.stringify(state)));
 
       this.stateManager.setState({
         ...state,
-        tables: updatedTables,
-        groups: updatedGroups
+        tables: finalTables,
+        groups: packingResult.groups
       });
 
-      this.canvasManager.fitToContent(updatedTables);
+      this.canvasManager.fitToContent(finalTables);
       this.uiManager.showToast("Organizado con IA con éxito.", "success");
     } catch (err) {
       console.error("Error al organizar con IA:", err);
