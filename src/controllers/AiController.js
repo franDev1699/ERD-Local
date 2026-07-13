@@ -862,20 +862,17 @@ export class AiController {
           if (window.lucide) window.lucide.createIcons();
         }
 
-        const panel = document.getElementById("ai-loading-panel");
-        const panelStatus = document.getElementById("ai-loading-overlay-status");
-        if (panel) {
-          panel.classList.remove("hidden");
-        }
-        if (panelStatus) {
-          panelStatus.textContent = `Conectando con ${config.provider}...`;
-        }
+        this.uiManager.showAiProgress("connecting", `Conectando con ${config.provider}...`, 5);
+        this.uiManager.addAiLog(`Iniciando conexión con ${config.provider}`);
 
         try {
           const mode = selectMode ? selectMode.value : "replace";
           const currentState = this.stateManager.getState();
           const selectContextDepth = document.getElementById("ai-context-depth");
           const contextDepth = selectContextDepth ? selectContextDepth.value : "all";
+
+          this.uiManager.showAiProgress("thinking", "Analizando el prompt y contexto...", 20);
+          this.uiManager.addAiLog("Analizando requerimientos del prompt");
           
           // Realizar llamada al proxy
           const result = await AiService.generate(prompt, mode !== 'replace' ? currentState : null, mode, {
@@ -887,10 +884,16 @@ export class AiController {
             throw new Error("El JSON retornado por la IA no tiene el formato correcto o está vacío.");
           }
 
+          this.uiManager.showAiProgress("generating", "Generando estructura del diagrama...", 55);
+          this.uiManager.addAiLog(`Generadas ${result.tables.length} tabla(s)`);
+
           // Guardar estado actual para deshacer
           this.history.push(JSON.parse(JSON.stringify(currentState)));
 
           if (mode === 'replace') {
+            this.uiManager.showAiProgress("processing", "Aplicando cambios al diagrama...", 75);
+            this.uiManager.addAiLog("Reemplazando diagrama completo");
+
             this.stateManager.setState({
               tables: result.tables,
               relationships: result.relationships || [],
@@ -898,6 +901,8 @@ export class AiController {
             });
             this.uiManager.showToast("Diagrama generado por IA con éxito.", "success");
           } else if (mode === 'edit') {
+            this.uiManager.showAiProgress("processing", "Integrando cambios en el diagrama...", 70);
+            this.uiManager.addAiLog("Modificando tablas existentes");
             const currentTables = currentState.tables || [];
             const currentRelationships = currentState.relationships || [];
             const currentGroups = currentState.groups || [];
@@ -1042,6 +1047,8 @@ export class AiController {
             this.uiManager.showToast("Diagrama modificado por IA con éxito.", "success");
 
           } else if (mode === 'append') {
+            this.uiManager.showAiProgress("processing", "Agregando nuevas tablas...", 70);
+            this.uiManager.addAiLog("Agregando elementos al diagrama");
             // Modo agregar
             const currentTables = currentState.tables || [];
             const currentRelationships = currentState.relationships || [];
@@ -1154,12 +1161,17 @@ export class AiController {
                                         promptLower.includes("margen") ||
                                         promptLower.includes("orden");
 
+          this.uiManager.showAiProgress("processing", "Organizando layout...", 90);
+
           if (mode === 'replace' || mode === 'append' || containsLayoutKeyword) {
             this.autoLayout();
           } else {
             this.stateManager.notify();
             this.canvasManager.fitToContent(this.stateManager.getState().tables);
           }
+
+          this.uiManager.showAiProgress("complete", `¡Listo! ${result.tables.length} tabla(s) generada(s)`, 100);
+          this.uiManager.addAiLog(`Resultado: ${result.tables.length} tabla(s), ${(result.relationships || []).length} relación(es)`);
 
           // Cerrar modal
           textareaPrompt.value = "";
@@ -1176,15 +1188,14 @@ export class AiController {
             statusLog.innerHTML = `<i data-lucide="alert-circle" style="width: 14px; height: 14px; margin-right: 6px;"></i> Error: ${err.message}`;
             if (window.lucide) window.lucide.createIcons();
           }
+          this.uiManager.showAiProgress("error", `Error: ${err.message}`, 0);
+          this.uiManager.addAiLog(`ERROR: ${err.message}`);
           this.uiManager.showToast("La generación falló. Verifica el log en el modal.", "error");
         } finally {
           btnGenerate.disabled = false;
           btnGenerate.innerHTML = `<i data-lucide="sparkles" style="width: 14px; height: 14px; margin-right: 6px;"></i> Generar Diagrama con IA`;
           if (window.lucide) window.lucide.createIcons();
-          const panel = document.getElementById("ai-loading-panel");
-          if (panel) {
-            panel.classList.add("hidden");
-          }
+          this.uiManager.hideAiProgress();
         }
       });
     }
@@ -1213,14 +1224,8 @@ export class AiController {
 
     this.uiManager.showToast("Organizando lienzo con IA...", "info");
 
-    const panel = document.getElementById("ai-loading-panel");
-    const panelStatus = document.getElementById("ai-loading-overlay-status");
-    if (panel) {
-      panel.classList.remove("hidden");
-    }
-    if (panelStatus) {
-      panelStatus.textContent = "Conectando con el proxy de IA...";
-    }
+    this.uiManager.showAiProgress("connecting", `Conectando con ${config.provider}...`, 10);
+    this.uiManager.addAiLog("Iniciando auto-layout con IA");
 
     try {
       const payload = {
@@ -1232,9 +1237,8 @@ export class AiController {
         currentState: state
       };
 
-      if (panelStatus) {
-        panelStatus.textContent = "Agrupando tablas por dominio funcional...";
-      }
+      this.uiManager.showAiProgress("thinking", "Agrupando tablas por dominio funcional...", 30);
+      this.uiManager.addAiLog("Analizando dominios funcionales");
 
       const response = await fetch('/api/ai/layout-group', {
         method: 'POST',
@@ -1254,9 +1258,8 @@ export class AiController {
         throw new Error("El formato del resultado devuelto por el servidor es inválido.");
       }
 
-      if (panelStatus) {
-        panelStatus.textContent = "Calculando coordenadas deterministas...";
-      }
+      this.uiManager.showAiProgress("generating", "Calculando coordenadas...", 60);
+      this.uiManager.addAiLog(`Grupos detectados: ${resData.groups.length}`);
 
       // Merge new groups with existing ones to preserve custom settings
       const updatedGroups = resData.groups.map(aiGroup => {
@@ -1332,6 +1335,9 @@ export class AiController {
 
       this.history.push(JSON.parse(JSON.stringify(state)));
 
+      this.uiManager.showAiProgress("processing", "Aplicando layout...", 85);
+      this.uiManager.addAiLog("Aplicando posiciones finales");
+
       this.stateManager.setState({
         ...state,
         tables: finalTables,
@@ -1340,18 +1346,20 @@ export class AiController {
 
       this.canvasManager.fitToContent(finalTables);
       this.uiManager.showToast("Organizado con IA con éxito.", "success");
+
+      this.uiManager.showAiProgress("complete", "¡Layout completado!", 100);
+      this.uiManager.addAiLog(`${finalTables.length} tabla(s) organizadas en ${packingResult.groups.length} grupo(s)`);
     } catch (err) {
       console.error("Error al organizar con IA:", err);
+      this.uiManager.showAiProgress("error", `Error: ${err.message}`, 0);
+      this.uiManager.addAiLog(`ERROR: ${err.message}`);
       this.uiManager.showToast("La ordenación por IA falló: " + err.message, "error");
     } finally {
       if (btnAutoLayout) {
         btnAutoLayout.disabled = false;
         btnAutoLayout.innerHTML = originalHtml;
       }
-      const panel = document.getElementById("ai-loading-panel");
-      if (panel) {
-        panel.classList.add("hidden");
-      }
+      this.uiManager.hideAiProgress();
     }
   }
 }
