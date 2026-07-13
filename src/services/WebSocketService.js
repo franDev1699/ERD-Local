@@ -77,7 +77,7 @@ export class WebSocketService {
             this.onMessageCallback(data);
           }
         } catch (error) {
-          console.error("Error parsing WebSocket message:", error);
+          console.error("Error parsing WebSocket message:", error, "Data length:", event.data?.length, "Preview:", String(event.data).substring(0, 200));
         }
       };
 

@@ -1350,16 +1350,23 @@ export class AiController {
       this.uiManager.showAiProgress("complete", "¡Layout completado!", 100);
       this.uiManager.addAiLog(`${finalTables.length} tabla(s) organizadas en ${packingResult.groups.length} grupo(s)`);
     } catch (err) {
+      this._aiHadError = true;
       console.error("Error al organizar con IA:", err);
       this.uiManager.showAiProgress("error", `Error: ${err.message}`, 0);
       this.uiManager.addAiLog(`ERROR: ${err.message}`);
       this.uiManager.showToast("La ordenación por IA falló: " + err.message, "error");
+      // Don't hide/minimize on error — keep the panel fully visible for the user
     } finally {
       if (btnAutoLayout) {
         btnAutoLayout.disabled = false;
         btnAutoLayout.innerHTML = originalHtml;
       }
-      this.uiManager.hideAiProgress();
+      // On success: minimize panel body after a delay (but keep header visible)
+      // On error: panel stays fully open — user closes it manually via X button
+      if (!this._aiHadError) {
+        this.uiManager.hideAiProgress(4000);
+      }
+      this._aiHadError = false;
     }
   }
 }

@@ -387,9 +387,16 @@ function mergeLayoutResult(originalState, layoutResult) {
 
 // Enviar un mensaje de estado/progreso al WebSocket activo del usuario
 function sendUserStatusLog(userId, message) {
-  rooms.forEach((room) => {
+  let matchCount = 0;
+  let totalClients = 0;
+  rooms.forEach((room, projectId) => {
     room.forEach((client) => {
-      if (client.user && client.user.id === userId && client.state === 1) {
+      totalClients++;
+      const clientUserId = client.user ? (client.user.userId || client.user.id) : null;
+      if (clientUserId === userId && client.state === 1) {
+        matchCount++;
+        const writable = client.socket && client.socket.writable;
+        console.log(`[WS-STATUS] Enviando a cliente en proyecto "${projectId}", socket writable: ${writable}, msg preview: ${message.substring(0, 50)}`);
         try {
           sendFrame(client.socket, {
             type: 'ai_status_progress',
@@ -401,9 +408,81 @@ function sendUserStatusLog(userId, message) {
       }
     });
   });
+  if (matchCount === 0) {
+    console.warn(`[WS-STATUS] ⚠️ No se encontró ningún cliente WS para userId="${userId}". Total clientes en rooms: ${totalClients}`);
+    // Log all connected user IDs for debugging
+    rooms.forEach((room, projectId) => {
+      room.forEach((client) => {
+        const clientUserId = client.user ? (client.user.userId || client.user.id) : 'N/A';
+        console.warn(`[WS-STATUS]   - Proyecto "${projectId}": user=${clientUserId}, state=${client.state}`);
+      });
+    });
+  }
 }
 
-async function makeAiRequest({ provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds, userId, enableThinking }) {
+function getAiRequestHash(params) {
+  const data = {
+    provider: params.provider || '',
+    model: params.model || '',
+    mode: params.mode || '',
+    prompt: params.prompt || '',
+    enableThinking: !!params.enableThinking,
+    currentQuerySql: params.currentQuerySql || '',
+    contextDepth: params.contextDepth || '',
+    selectedTableIds: params.selectedTableIds || [],
+  };
+  
+  if (params.currentState) {
+    if (params.mode === 'layout_group') {
+      data.currentState = {
+        tables: (params.currentState.tables || []).map(t => ({ id: t.id, name: t.name, groupId: t.groupId || null })),
+        relationships: (params.currentState.relationships || []).map(r => ({ from: r.fromTable, to: r.toTable }))
+      };
+    } else {
+      data.currentState = params.currentState;
+    }
+  }
+  
+  const serialized = JSON.stringify(data);
+  return crypto.createHash('sha256').update(serialized).digest('hex');
+}
+
+function getAiCache(hash) {
+  try {
+    const stmt = db.prepare("SELECT response FROM ai_cache WHERE hash = ?");
+    const row = stmt.get(hash);
+    if (row) {
+      console.log(`[Cache] Usando respuesta de IA guardada en caché (${hash.slice(0, 8)}...)`);
+      return JSON.parse(row.response);
+    }
+    return null;
+  } catch (err) {
+    console.error("[Cache] Error al leer caché:", err.message);
+    return null;
+  }
+}
+
+function saveAiCache(hash, response) {
+  try {
+    const stmt = db.prepare("INSERT OR REPLACE INTO ai_cache (hash, response) VALUES (?, ?)");
+    stmt.run(hash, JSON.stringify(response));
+    console.log(`[Cache] Respuesta de IA guardada en caché bajo hash: ${hash.slice(0, 8)}...`);
+  } catch (err) {
+    console.error("[Cache] Error al escribir en caché:", err.message);
+  }
+}
+
+async function makeAiRequest(params) {
+  const { provider, apiKey, apiUrl, model, prompt, currentState, mode, engine, currentQuerySql, contextDepth, selectedTableIds, userId, enableThinking } = params;
+  
+  const cacheHash = getAiRequestHash(params);
+  const cachedResponse = getAiCache(cacheHash);
+  if (cachedResponse) {
+    console.log(`[Cache] Hit para modo "${mode}" — saltando request al modelo.`);
+    sendUserStatusLog(userId, `Respuesta obtenida del caché.`);
+    return cachedResponse;
+  }
+
   let systemInstruction = '';
   
   if (mode === 'layout_group') {
@@ -509,8 +588,37 @@ Estado actual del diagrama:
       if (parsed.error) {
         throw new Error(parsed.error.message || 'Error en la API de Gemini');
       }
-      const textResponse = parsed.candidates[0].content.parts[0].text;
-      return JSON.parse(cleanJsonResponseText(textResponse));
+      
+      let reasoningText = '';
+      let textResponse = '';
+      
+      if (parsed.candidates && parsed.candidates[0] && parsed.candidates[0].content && parsed.candidates[0].content.parts) {
+        for (const part of parsed.candidates[0].content.parts) {
+          if (part.thought) {
+            reasoningText += part.text || '';
+          } else {
+            textResponse += part.text || '';
+          }
+        }
+      }
+      
+      if (!textResponse && parsed.candidates && parsed.candidates[0] && parsed.candidates[0].content && parsed.candidates[0].content.parts && parsed.candidates[0].content.parts[0]) {
+        textResponse = parsed.candidates[0].content.parts[0].text || '';
+      }
+      
+      const thinkMatch = textResponse.match(/<think>([\s\S]*?)<\/think>/);
+      if (thinkMatch) {
+        reasoningText = (reasoningText ? reasoningText + '\n' : '') + thinkMatch[1];
+        textResponse = textResponse.replace(/<think>[\s\S]*?<\/think>/, '');
+      }
+      
+      if (reasoningText.trim()) {
+        sendUserStatusLog(userId, `[THINKING] ${reasoningText.trim()}`);
+      }
+
+      const parsedResult = JSON.parse(cleanJsonResponseText(textResponse));
+      saveAiCache(cacheHash, parsedResult);
+      return parsedResult;
     } catch (e) {
       throw new Error('La respuesta de Gemini no se pudo procesar como JSON: ' + e.message);
     }
@@ -550,6 +658,7 @@ Estado actual del diagrama:
     }
 
     let textResponse = '';
+    let reasoningText = '';
     let finishReason = 'length';
     let attempts = 0;
     const maxAttempts = 3;
@@ -575,7 +684,7 @@ Estado actual del diagrama:
         messages.push({ role: 'assistant', content: partContent });
         messages.push({
           role: 'user',
-          content: 'Tu respuesta anterior se interrumpió por el límite de espacio. Continúa imprimiendo el JSON EXACTAMENTE desde donde te quedaste (sin repetir nada anterior, sin envolverlo en bloques markdown y sin explicaciones adicionales). Solo escribe la continuación.'
+          content: 'Tu respuesta anterior se interrumpió por el límite de tokens. Continúa escribiendo la respuesta EXACTAMENTE desde el último carácter, sin repetir nada de lo que ya escribiste, sin envolverlo en bloques de código markdown (como ```json) y sin dar explicaciones. Solo escribe el fragmento restante del JSON.'
         });
       }
 
@@ -585,11 +694,10 @@ Estado actual del diagrama:
         max_tokens: 8192
       };
 
-      if (attempts === 1) {
-        requestPayload.chat_template_kwargs = { enable_thinking: !!enableThinking };
-        if (provider === 'openai') {
-          requestPayload.response_format = { type: "json_object" };
-        }
+      // Send enable_thinking on all attempts so the model keeps its thinking mode
+      requestPayload.chat_template_kwargs = { enable_thinking: !!enableThinking };
+      if (attempts === 1 && provider === 'openai') {
+        requestPayload.response_format = { type: "json_object" };
       }
 
       let res;
@@ -617,16 +725,62 @@ Estado actual del diagrama:
 
       partContent = parsed.choices[0].message.content || '';
       textResponse += partContent;
+      
+      // Check multiple possible fields for thinking/reasoning content
+      const msg = parsed.choices[0].message;
+      // DEBUG: Log all message fields to identify where thinking content lives
+      const msgKeys = Object.keys(msg);
+      console.log(`[AI-DEBUG] Message keys: ${msgKeys.join(', ')}`);
+      console.log(`[AI-DEBUG] reasoning_content: ${(msg.reasoning_content || '').substring(0, 100)}`);
+      console.log(`[AI-DEBUG] reasoning: ${(msg.reasoning || '').substring(0, 100)}`);
+      console.log(`[AI-DEBUG] content has <think>: ${partContent.includes('<think>')}`);
+      console.log(`[AI-DEBUG] enableThinking: ${enableThinking}`);
+      const reasoningPart = msg.reasoning_content || msg.reasoning || '';
+      if (reasoningPart) {
+        reasoningText += reasoningPart;
+      }
+      
       finishReason = parsed.choices[0].finish_reason;
       
       sendUserStatusLog(userId, `Procesados ${textResponse.length} caracteres de respuesta...`);
     }
 
+    const thinkMatch = textResponse.match(/<think>([\s\S]*?)<\/think>/);
+    if (thinkMatch) {
+      reasoningText = (reasoningText ? reasoningText + '\n' : '') + thinkMatch[1];
+      textResponse = textResponse.replace(/<think>[\s\S]*?<\/think>/, '');
+    }
+    
+    if (reasoningText.trim()) {
+      // Truncate thinking to avoid oversized WebSocket frames (models can produce 10-18KB+ of thinking)
+      const MAX_THINKING_LENGTH = 2000;
+      let thinkingToSend = reasoningText.trim();
+      if (thinkingToSend.length > MAX_THINKING_LENGTH) {
+        thinkingToSend = thinkingToSend.substring(0, MAX_THINKING_LENGTH) + '\n\n... (truncado, ' + reasoningText.trim().length + ' chars totales)';
+      }
+      console.log(`[AI-DEBUG] Enviando [THINKING] al usuario ${userId}, longitud: ${reasoningText.trim().length} chars (enviando ${thinkingToSend.length})`);
+      sendUserStatusLog(userId, `[THINKING] ${thinkingToSend}`);
+    } else {
+      console.log(`[AI-DEBUG] No se encontró thinking content. reasoningText empty: ${!reasoningText}`);
+    }
+
     try {
-      return tryParseJSONResponse(textResponse);
+      const parsedResult = tryParseJSONResponse(textResponse);
+      saveAiCache(cacheHash, parsedResult);
+      return parsedResult;
     } catch (parseErr) {
       if (finishReason === 'length') {
-        throw new Error('La respuesta de la IA se interrumpió por límite de longitud (finish_reason: length) y no se pudo procesar como JSON después de varios intentos de continuación.');
+        // Try to repair the truncated JSON before giving up
+        sendUserStatusLog(userId, 'Respuesta truncada. Intentando reparar JSON...');
+        try {
+          const repaired = repairTruncatedJson(cleanJsonResponseText(textResponse));
+          const repairedResult = JSON.parse(repaired);
+          sendUserStatusLog(userId, 'JSON reparado exitosamente tras truncamiento.');
+          saveAiCache(cacheHash, repairedResult);
+          return repairedResult;
+        } catch (repairErr) {
+          throw new Error('La respuesta de la IA se truncó (finish_reason: length) y no se pudo reparar el JSON. Intenta reducir la cantidad de tablas o usar un modelo con mayor contexto.');
+        }
       }
       throw new Error('La respuesta del proveedor de IA no se pudo procesar como JSON: ' + parseErr.message + '\nRespuesta acumulada: ' + textResponse);
     }
@@ -665,7 +819,9 @@ Estado actual del diagrama:
         throw new Error(parsed.error || 'Error en la API de Ollama');
       }
       const textResponse = parsed.message.content;
-      return JSON.parse(cleanJsonResponseText(textResponse));
+      const parsedResult = JSON.parse(cleanJsonResponseText(textResponse));
+      saveAiCache(cacheHash, parsedResult);
+      return parsedResult;
     } catch (e) {
       throw new Error('La respuesta de Ollama no se pudo procesar como JSON: ' + e.message);
     }
@@ -1039,34 +1195,144 @@ function cleanJsonResponseText(text) {
   return cleaned.trim();
 }
 
+// Repara un JSON truncado cerrando llaves y corchetes abiertos de forma robusta
+function repairTruncatedJson(jsonStr) {
+  let str = jsonStr.trim();
+  let stack = [];
+  let inString = false;
+  let escaped = false;
+  
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (!inString) {
+      if (char === '{' || char === '[') {
+        stack.push(char);
+      } else if (char === '}') {
+        if (stack[stack.length - 1] === '{') {
+          stack.pop();
+        }
+      } else if (char === ']') {
+        if (stack[stack.length - 1] === '[') {
+          stack.pop();
+        }
+      }
+    }
+  }
+  
+  if (stack.length === 0) {
+    return str;
+  }
+  
+  if (inString) {
+    str += '"';
+  }
+  
+  let cleanStr = str;
+  while (cleanStr.length > 0) {
+    const lastChar = cleanStr[cleanStr.length - 1];
+    if (lastChar === ':' || lastChar === ',' || /\s/.test(lastChar)) {
+      cleanStr = cleanStr.slice(0, -1);
+    } else if (lastChar === '"' && cleanStr[cleanStr.length - 2] === ',') {
+      cleanStr = cleanStr.slice(0, -1);
+    } else {
+      break;
+    }
+  }
+  
+  if (cleanStr.length === 0) {
+    return str;
+  }
+  
+  const lastComma = cleanStr.lastIndexOf(',');
+  const lastOpenBrace = Math.max(cleanStr.lastIndexOf('{'), cleanStr.lastIndexOf('['));
+  const cutIndex = Math.max(lastComma, lastOpenBrace);
+  
+  if (cutIndex !== -1) {
+    const tail = cleanStr.slice(cutIndex);
+    const quoteCount = (tail.match(/"/g) || []).length;
+    if (quoteCount % 2 !== 0 || tail.trim().endsWith(':') || 
+        (tail.includes('":') && !tail.includes('":"') && !tail.includes('":null') && 
+         !tail.includes('":true') && !tail.includes('":false') && !/\d/.test(tail))) {
+      cleanStr = cleanStr.slice(0, cutIndex);
+      while (cleanStr.length > 0 && (cleanStr[cleanStr.length - 1] === ',' || /\s/.test(cleanStr[cleanStr.length - 1]))) {
+        cleanStr = cleanStr.slice(0, -1);
+      }
+    }
+  }
+
+  stack = [];
+  inString = false;
+  escaped = false;
+  for (let i = 0; i < cleanStr.length; i++) {
+    const char = cleanStr[i];
+    if (escaped) { escaped = false; continue; }
+    if (char === '\\') { escaped = true; continue; }
+    if (char === '"') { inString = !inString; continue; }
+    if (!inString) {
+      if (char === '{' || char === '[') stack.push(char);
+      else if (char === '}') { if (stack[stack.length - 1] === '{') stack.pop(); }
+      else if (char === ']') { if (stack[stack.length - 1] === '[') stack.pop(); }
+    }
+  }
+
+  let closingTags = '';
+  for (let i = stack.length - 1; i >= 0; i--) {
+    if (stack[i] === '{') {
+      closingTags += '}';
+    } else if (stack[i] === '[') {
+      closingTags += ']';
+    }
+  }
+  
+  return cleanStr + closingTags;
+}
+
 // Intenta parsear el JSON de forma robusta, buscando bloques válidos si la respuesta concatenada falló
 function tryParseJSONResponse(text) {
   const cleaned = cleanJsonResponseText(text);
   try {
     return JSON.parse(cleaned);
   } catch (err) {
-    // Si falla, busquemos el último bloque JSON { ... } completo en el texto
-    // (Útil si el modelo recomenzó desde el principio en la continuación)
-    const firstBrace = text.indexOf('{');
-    const lastBrace = text.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      const candidate = text.slice(firstBrace, lastBrace + 1);
-      try {
-        return JSON.parse(cleanJsonResponseText(candidate));
-      } catch (e) {
-        // Intentar buscar el último bloque '{' si hubo un reinicio completo en la concatenación
-        const lastStartBrace = text.lastIndexOf('{');
-        if (lastStartBrace !== -1 && lastStartBrace > firstBrace && lastBrace > lastStartBrace) {
-          const lastCandidate = text.slice(lastStartBrace, lastBrace + 1);
-          try {
-            return JSON.parse(cleanJsonResponseText(lastCandidate));
-          } catch (e2) {}
+    // Intentar reparar el JSON si se truncó
+    try {
+      const repaired = repairTruncatedJson(cleaned);
+      return JSON.parse(repaired);
+    } catch (repairErr) {
+      // Si falla la reparación, probar las heurísticas anteriores
+      const firstBrace = text.indexOf('{');
+      const lastBrace = text.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        const candidate = text.slice(firstBrace, lastBrace + 1);
+        try {
+          return JSON.parse(cleanJsonResponseText(candidate));
+        } catch (e) {
+          // Intentar buscar el último bloque '{' si hubo un reinicio completo en la concatenación
+          const lastStartBrace = text.lastIndexOf('{');
+          if (lastStartBrace !== -1 && lastStartBrace > firstBrace && lastBrace > lastStartBrace) {
+            const lastCandidate = text.slice(lastStartBrace, lastBrace + 1);
+            try {
+              return JSON.parse(cleanJsonResponseText(lastCandidate));
+            } catch (e2) {}
+          }
         }
       }
+      throw err;
     }
-    throw err;
   }
 }
+
 
 // Helper to get client IP
 function getClientIp(req) {
@@ -1138,7 +1404,8 @@ REGLAS CRÍTICAS:
     ...params,
     prompt: prompt,
     mode: 'layout_group',
-    userId: userId
+    userId: userId,
+    enableThinking: false // Desactivar pensamiento profundo para agrupamiento (ahorra ~90% de tiempo y tokens)
   };
 
   return await makeAiRequest(requestParams);
@@ -1848,131 +2115,166 @@ const server = http.createServer(async (req, res) => {
           .filter(t => t.groupId)
           .map(t => ({ tableId: t.id, groupId: t.groupId }));
 
-        const BATCH_SIZE = 20;
+        const BATCH_SIZE = 60;
         const batches = [];
         for (let i = 0; i < simplifiedTables.length; i += BATCH_SIZE) {
           batches.push(simplifiedTables.slice(i, i + BATCH_SIZE));
         }
 
-        const allGroups = [...existingGroups];
-        const allAssignments = [];
-        // Inicializar con IDs de grupos existentes para que la IA los conozca y no cree duplicados
         const existingGroupIds = new Set(existingGroups.map(g => g.id));
-        // Preservar asignaciones existentes como fallback si la IA falla
         const preservedAssignments = new Map(existingAssignments.map(a => [a.tableId, a.groupId]));
 
-        for (let b = 0; b < batches.length; b++) {
-          const batchTables = batches[b];
+        // Ejecutar lotes en paralelo
+        sendUserStatusLog(session.user_id, `Iniciando análisis en paralelo para ${batches.length} lote(s)...`);
+        
+        const batchPromises = batches.map(async (batchTables, b) => {
           const batchTableIds = new Set(batchTables.map(t => t.id));
           const batchRels = simplifiedRelationships.filter(r => batchTableIds.has(r.from) || batchTableIds.has(r.to));
 
           let batchResult;
           try {
-            sendUserStatusLog(session.user_id, `Analizando agrupación para el lote ${b + 1} de ${batches.length}...`);
-            batchResult = await executeLayoutGroupBatch(params, batchTables, batchRels, allGroups, existingAssignments, session.user_id);
+            sendUserStatusLog(session.user_id, `Analizando lote ${b + 1} de ${batches.length}...`);
+            batchResult = await executeLayoutGroupBatch(params, batchTables, batchRels, existingGroups, existingAssignments, session.user_id);
           } catch (batchErr) {
             console.error(`Error en lote ${b + 1}:`, batchErr.message);
-            // Fallback: preservar asignaciones existentes, no asignar null ciegamente
-            batchTables.forEach(t => {
-              if (preservedAssignments.has(t.id)) {
-                allAssignments.push({ tableId: t.id, groupId: preservedAssignments.get(t.id) });
-              } else {
-                allAssignments.push({ tableId: t.id, groupId: null });
-              }
-            });
-            continue;
-          }
-
-          // Parse and merge results - primero registrar TODOS los grupos del resultado
-          if (batchResult && Array.isArray(batchResult.groups)) {
-            batchResult.groups.forEach(g => {
-              if (g && g.id && g.name) {
-                let color = g.color;
-                if (!isValidHexColor(color)) {
-                  color = getFallbackColor(allGroups.length);
-                }
-                if (!existingGroupIds.has(g.id)) {
-                  existingGroupIds.add(g.id);
-                  allGroups.push({ id: g.id, name: g.name, color });
-                }
-              }
-            });
+            sendUserStatusLog(session.user_id, `⚠️ Error en lote ${b + 1}: ${batchErr.message.substring(0, 120)}`);
+            const fallbackAssignments = batchTables.map(t => ({
+              tableId: t.id,
+              groupId: preservedAssignments.get(t.id) || null
+            }));
+            return { groups: [], assignments: fallbackAssignments, batchIndex: b };
           }
 
           const assignmentsMap = new Map();
           if (batchResult && Array.isArray(batchResult.assignments)) {
             batchResult.assignments.forEach(asgn => {
               if (asgn && asgn.tableId && batchTableIds.has(asgn.tableId)) {
-                // Si la tabla ya tenía una asignación existente, preservarla
-                if (preservedAssignments.has(asgn.tableId)) {
-                  assignmentsMap.set(asgn.tableId, preservedAssignments.get(asgn.tableId));
-                } else if (asgn.groupId) {
-                  assignmentsMap.set(asgn.tableId, asgn.groupId);
-                } else {
-                  assignmentsMap.set(asgn.tableId, null);
-                }
-                allAssignments.push({ tableId: asgn.tableId, groupId: assignmentsMap.get(asgn.tableId) });
+                assignmentsMap.set(asgn.tableId, asgn.groupId || null);
               }
             });
           }
 
-          // Check if any tables from this batch are missing in assignments
           const missingTables = batchTables.filter(t => !assignmentsMap.has(t.id));
           if (missingTables.length > 0) {
-            console.log(`Lote ${b + 1}: Faltan asignaciones para ${missingTables.length} tablas. Intentando batch reducido...`);
+            console.log(`Lote ${b + 1}: Faltan asignaciones para ${missingTables.length} tablas. Reintentando...`);
             try {
-              sendUserStatusLog(session.user_id, `Reintentando asignación para ${missingTables.length} tablas pendientes...`);
               const retryRels = simplifiedRelationships.filter(r => missingTables.some(mt => mt.id === r.from || mt.id === r.to));
-              const retryResult = await executeLayoutGroupBatch(params, missingTables, retryRels, allGroups, existingAssignments, session.user_id);
-
-              if (retryResult && Array.isArray(retryResult.groups)) {
-                retryResult.groups.forEach(g => {
-                  if (g && g.id && g.name) {
-                    let color = g.color;
-                    if (!isValidHexColor(color)) {
-                      color = getFallbackColor(allGroups.length);
-                    }
-                    if (!existingGroupIds.has(g.id)) {
-                      existingGroupIds.add(g.id);
-                      allGroups.push({ id: g.id, name: g.name, color });
-                    }
-                  }
-                });
-              }
-
+              const retryResult = await executeLayoutGroupBatch(params, missingTables, retryRels, existingGroups, existingAssignments, session.user_id);
               if (retryResult && Array.isArray(retryResult.assignments)) {
                 retryResult.assignments.forEach(asgn => {
                   if (asgn && asgn.tableId && missingTables.some(mt => mt.id === asgn.tableId)) {
-                    // Preservar asignaciones existentes incluso en retry
-                    if (preservedAssignments.has(asgn.tableId)) {
-                      assignmentsMap.set(asgn.tableId, preservedAssignments.get(asgn.tableId));
-                    } else if (asgn.groupId) {
-                      assignmentsMap.set(asgn.tableId, asgn.groupId);
-                    } else {
-                      assignmentsMap.set(asgn.tableId, null);
-                    }
-                    allAssignments.push({ tableId: asgn.tableId, groupId: assignmentsMap.get(asgn.tableId) });
+                    assignmentsMap.set(asgn.tableId, asgn.groupId || null);
                   }
                 });
               }
             } catch (retryErr) {
               console.error(`Error en reintento de lote ${b + 1}:`, retryErr.message);
             }
-
-            // Fallback: preservar asignaciones existentes para tablas aún sin asignar
-            const finalMissing = batchTables.filter(t => !assignmentsMap.has(t.id));
-            finalMissing.forEach(t => {
-              if (preservedAssignments.has(t.id)) {
-                allAssignments.push({ tableId: t.id, groupId: preservedAssignments.get(t.id) });
-              } else {
-                allAssignments.push({ tableId: t.id, groupId: null });
-              }
-            });
           }
-        }
+
+          batchTables.forEach(t => {
+            if (!assignmentsMap.has(t.id)) {
+              assignmentsMap.set(t.id, preservedAssignments.get(t.id) || null);
+            }
+          });
+
+          const finalBatchAssignments = Array.from(assignmentsMap.entries()).map(([tableId, groupId]) => ({
+            tableId,
+            groupId
+          }));
+
+          return {
+            groups: batchResult && Array.isArray(batchResult.groups) ? batchResult.groups : [],
+            assignments: finalBatchAssignments,
+            batchIndex: b
+          };
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+
+        const rawGroups = [];
+        const rawAssignments = [];
+        const finalGroups = [...existingGroups];
+        const existingGroupNames = new Map(existingGroups.map(g => [g.name.trim().toLowerCase(), g.id]));
+
+        batchResults.forEach((res, b) => {
+          const batchGroupMap = new Map();
+          
+          res.groups.forEach(g => {
+            if (g && g.id && g.name) {
+              const nameLower = g.name.trim().toLowerCase();
+              if (existingGroupNames.has(nameLower)) {
+                batchGroupMap.set(g.id, existingGroupNames.get(nameLower));
+              } else {
+                const newGroupId = `b_${b}_${g.id}`;
+                batchGroupMap.set(g.id, newGroupId);
+                rawGroups.push({ id: newGroupId, name: g.name.trim(), color: g.color });
+              }
+            }
+          });
+
+          res.assignments.forEach(asgn => {
+            let finalGroupId = asgn.groupId;
+            if (preservedAssignments.has(asgn.tableId)) {
+              finalGroupId = preservedAssignments.get(asgn.tableId);
+            } else if (asgn.groupId) {
+              if (existingGroupIds.has(asgn.groupId)) {
+                finalGroupId = asgn.groupId;
+              } else if (batchGroupMap.has(asgn.groupId)) {
+                finalGroupId = batchGroupMap.get(asgn.groupId);
+              } else {
+                finalGroupId = null;
+              }
+            }
+            rawAssignments.push({ tableId: asgn.tableId, groupId: finalGroupId });
+          });
+        });
+
+        const nameToGroupMap = new Map();
+        rawGroups.forEach(rg => {
+          const nameLower = rg.name.toLowerCase();
+          if (!nameToGroupMap.has(nameLower)) {
+            const canonicalId = `g_${crypto.randomBytes(4).toString('hex')}`;
+            let color = rg.color;
+            if (!isValidHexColor(color)) {
+              color = getFallbackColor(finalGroups.length + nameToGroupMap.size);
+            }
+            nameToGroupMap.set(nameLower, {
+              id: canonicalId,
+              name: rg.name,
+              color: color,
+              sourceIds: new Set([rg.id])
+            });
+          } else {
+            nameToGroupMap.get(nameLower).sourceIds.add(rg.id);
+          }
+        });
+
+        nameToGroupMap.forEach(cg => {
+          finalGroups.push({ id: cg.id, name: cg.name, color: cg.color });
+        });
+
+        const finalAssignments = rawAssignments.map(asgn => {
+          let finalGroupId = asgn.groupId;
+          if (finalGroupId && finalGroupId.startsWith('b_')) {
+            let foundCanonicalId = null;
+            for (const cg of nameToGroupMap.values()) {
+              if (cg.sourceIds.has(finalGroupId)) {
+                foundCanonicalId = cg.id;
+                break;
+              }
+            }
+            finalGroupId = foundCanonicalId || null;
+          }
+          return { tableId: asgn.tableId, groupId: finalGroupId };
+        });
+
+        // Filtrar grupos vacíos (grupos que no tienen ninguna tabla asignada)
+        const assignedGroupIds = new Set(finalAssignments.map(a => a.groupId).filter(Boolean));
+        const filteredGroups = finalGroups.filter(g => assignedGroupIds.has(g.id));
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, groups: allGroups, assignments: allAssignments }));
+        res.end(JSON.stringify({ success: true, groups: filteredGroups, assignments: finalAssignments }));
       } catch (err) {
         console.error('Error en /api/ai/layout-group:', err.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });

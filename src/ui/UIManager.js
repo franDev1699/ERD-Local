@@ -175,6 +175,8 @@ export class UIManager {
     const title = document.getElementById("ai-panel-title");
     const pulseRing = document.getElementById("ai-pulse-ring");
     const phasesContainer = document.getElementById("ai-phases-container");
+    const panelBody = document.getElementById("ai-loading-panel-body");
+    const iconMinimize = document.getElementById("icon-ai-panel-minimize");
 
     if (!panel) return;
 
@@ -184,11 +186,21 @@ export class UIManager {
       this._hideAiTimeout = null;
     }
 
+    // Clear old logs when starting a new operation
+    if (phase === "connecting") {
+      const logContainer = document.getElementById("ai-detail-log");
+      if (logContainer) {
+        logContainer.innerHTML = "";
+        logContainer.style.display = "none";
+      }
+    }
+
+    // Restore state: show panel, show panel body, and reset chevron
     panel.classList.remove("hidden");
-    // Force reflow so the browser actually renders the panel
-    panel.offsetHeight;
     panel.style.opacity = "1";
     panel.style.pointerEvents = "auto";
+    if (panelBody) panelBody.classList.remove("hidden");
+    if (iconMinimize) iconMinimize.setAttribute("data-lucide", "chevron-down");
 
     const phaseConfig = {
       connecting: { title: "Conectando", progress: 10, icon: "wifi", color: "#6366f1" },
@@ -257,6 +269,8 @@ export class UIManager {
 
   hideAiProgress(delay = 2500) {
     const panel = document.getElementById("ai-loading-panel");
+    const panelBody = document.getElementById("ai-loading-panel-body");
+    const iconMinimize = document.getElementById("icon-ai-panel-minimize");
     if (!panel) return;
 
     // Cancel any previous pending hide
@@ -266,36 +280,14 @@ export class UIManager {
     }
 
     this._hideAiTimeout = setTimeout(() => {
-      panel.style.opacity = "0";
-
-      // Wait for opacity transition to finish before adding hidden
-      setTimeout(() => {
-        panel.classList.add("hidden");
-        panel.style.opacity = "";
-        panel.style.pointerEvents = "";
-
-        const statusBar = document.getElementById("ai-progress-bar");
-        const statusText = document.getElementById("ai-loading-overlay-status");
-        const title = document.getElementById("ai-panel-title");
-        if (statusBar) statusBar.style.width = "0%";
-        if (statusText) statusText.textContent = "Iniciando...";
-        if (title) title.textContent = "IA Trabajando";
-
-        const steps = document.querySelectorAll(".ai-phase-step");
-        steps.forEach(step => {
-          const icon = step.querySelector(".ai-phase-icon");
-          const text = step.querySelector("span");
-          if (icon) {
-            icon.style.background = "var(--color-bg-tertiary)";
-            icon.style.color = "var(--color-text-muted)";
-          }
-          if (text) {
-            text.style.color = "var(--color-text-muted)";
-            text.style.fontWeight = "400";
-          }
-          step.style.background = "transparent";
-        });
-      }, 400);
+      // Instead of hiding the entire panel, just minimize it (collapse body)
+      if (panelBody) {
+        panelBody.classList.add("hidden");
+      }
+      if (iconMinimize) {
+        iconMinimize.setAttribute("data-lucide", "chevron-up");
+        if (window.lucide) window.lucide.createIcons();
+      }
     }, delay);
   }
 
@@ -304,10 +296,63 @@ export class UIManager {
     if (!logContainer) return;
 
     logContainer.style.display = "block";
-    const logEntry = document.createElement("div");
-    logEntry.style.marginBottom = "2px";
-    logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-    logContainer.appendChild(logEntry);
+
+    if (message.startsWith("[THINKING]")) {
+      // Cancel any pending auto-hide so the user can read the thinking block
+      if (this._hideAiTimeout) {
+        clearTimeout(this._hideAiTimeout);
+        this._hideAiTimeout = null;
+      }
+
+      const thinkingText = message.replace("[THINKING]", "").trim();
+      
+      const thinkingBlock = document.createElement("div");
+      thinkingBlock.className = "ai-thinking-block";
+      thinkingBlock.style.marginTop = "8px";
+      thinkingBlock.style.marginBottom = "8px";
+      thinkingBlock.style.padding = "10px 12px";
+      thinkingBlock.style.background = "rgba(139, 92, 246, 0.04)";
+      thinkingBlock.style.borderLeft = "3px solid #8b5cf6";
+      thinkingBlock.style.borderRadius = "6px";
+      thinkingBlock.style.fontSize = "0.78rem";
+      thinkingBlock.style.transition = "all 0.3s ease";
+      
+      thinkingBlock.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #a855f7; margin-bottom: 6px; cursor: pointer; user-select: none;" class="ai-thinking-header">
+          <i data-lucide="brain" style="width: 14px; height: 14px;"></i>
+          <span>Razonamiento de la IA (Thinking)</span>
+          <span style="font-size: 0.7rem; color: var(--color-text-muted); font-weight: normal; margin-left: auto;" class="ai-thinking-toggle-text">(Click para contraer)</span>
+          <i data-lucide="chevron-down" style="width: 14px; height: 14px; color: var(--color-text-muted); transform: rotate(180deg); transition: transform 0.2s ease;" class="ai-thinking-chevron"></i>
+        </div>
+        <div style="white-space: pre-wrap; font-family: 'Inter', sans-serif; color: var(--color-text-muted); line-height: 1.5; max-height: 250px; overflow-y: auto; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.05);" class="ai-thinking-content">
+          ${thinkingText}
+        </div>
+      `;
+      
+      const header = thinkingBlock.querySelector(".ai-thinking-header");
+      const content = thinkingBlock.querySelector(".ai-thinking-content");
+      const toggleText = thinkingBlock.querySelector(".ai-thinking-toggle-text");
+      const chevron = thinkingBlock.querySelector(".ai-thinking-chevron");
+      
+      header.addEventListener("click", () => {
+        content.classList.toggle("hidden");
+        const isHidden = content.classList.contains("hidden");
+        toggleText.textContent = isHidden ? "(Click para expandir)" : "(Click para contraer)";
+        chevron.style.transform = isHidden ? "rotate(0deg)" : "rotate(180deg)";
+        chevron.style.transition = "transform 0.2s ease";
+      });
+      
+      logContainer.appendChild(thinkingBlock);
+      if (window.lucide) window.lucide.createIcons();
+    } else {
+      const logEntry = document.createElement("div");
+      logEntry.style.marginBottom = "3px";
+      logEntry.style.fontSize = "0.78rem";
+      logEntry.style.color = "var(--color-text-muted)";
+      logEntry.innerHTML = `<span style="color: var(--color-text-muted); opacity: 0.6; font-size: 0.7rem; margin-right: 4px;">[${new Date().toLocaleTimeString()}]</span> ${message}`;
+      logContainer.appendChild(logEntry);
+    }
+    
     logContainer.scrollTop = logContainer.scrollHeight;
   }
 }
