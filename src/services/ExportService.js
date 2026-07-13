@@ -240,7 +240,9 @@ export class ExportService {
     const fieldB = tableB.fields.find(f => f.id === rel.toField);
     if (!fieldA || !fieldB) return null;
 
-    if (fieldA.isPK && !fieldB.isPK) {
+    const cardinality = rel.cardinality || '1:N';
+
+    if (cardinality === '1:N') {
       return {
         fkTable: tableB,
         fkField: fieldB,
@@ -249,7 +251,7 @@ export class ExportService {
       };
     }
 
-    if (!fieldA.isPK && fieldB.isPK) {
+    if (cardinality === 'N:1') {
       return {
         fkTable: tableA,
         fkField: fieldA,
@@ -258,11 +260,21 @@ export class ExportService {
       };
     }
 
+    if (cardinality === '1:1') {
+      if (fieldA.isPK && !fieldB.isPK) {
+        return { fkTable: tableB, fkField: fieldB, pkTable: tableA, pkField: fieldA };
+      }
+      if (!fieldA.isPK && fieldB.isPK) {
+        return { fkTable: tableA, fkField: fieldA, pkTable: tableB, pkField: fieldB };
+      }
+      return { fkTable: tableB, fkField: fieldB, pkTable: tableA, pkField: fieldA };
+    }
+
     return {
-      fkTable: tableA,
-      fkField: fieldA,
-      pkTable: tableB,
-      pkField: fieldB
+      fkTable: tableB,
+      fkField: fieldB,
+      pkTable: tableA,
+      pkField: fieldA
     };
   }
 }
