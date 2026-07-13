@@ -23,13 +23,15 @@ export class ExportService {
       const upper = fieldType.toUpperCase();
       
       if (dial === 'sqlserver') {
-        if (upper === 'TEXT') return 'NVARCHAR(MAX)';
-        if (upper.startsWith('VARCHAR')) return upper.replace('VARCHAR', 'NVARCHAR');
-        if (upper === 'BOOLEAN') return 'BIT';
-        if (upper === 'TIMESTAMP') return 'DATETIME2';
-        if (upper.startsWith('DECIMAL')) return upper;
-        if (upper.startsWith('ENUM')) return 'NVARCHAR(255)';
-        return upper;
+        let typeStr = upper.replace(/\s*UNSIGNED/gi, '').trim();
+        typeStr = typeStr.replace(/TINYINT\s*\(\s*\d+\s*\)/gi, 'TINYINT');
+        if (typeStr === 'TEXT') return 'NVARCHAR(MAX)';
+        if (typeStr.startsWith('VARCHAR')) return typeStr.replace('VARCHAR', 'NVARCHAR');
+        if (typeStr === 'BOOLEAN') return 'BIT';
+        if (typeStr === 'TIMESTAMP') return 'DATETIME2';
+        if (typeStr.startsWith('DECIMAL')) return typeStr;
+        if (typeStr.startsWith('ENUM')) return 'NVARCHAR(255)';
+        return typeStr;
       }
       
       if (dial === 'postgresql') {
