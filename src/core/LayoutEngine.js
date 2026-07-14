@@ -149,11 +149,13 @@ export class LayoutEngine {
     const orderedTables = this.sortTablesByConnections(tables, relationships);
 
     let colCount;
-    if (options && options.cols) {
-      colCount = parseInt(options.cols, 10);
-    } else if (options && options.rows) {
-      const rowCount = parseInt(options.rows, 10);
-      colCount = Math.ceil(tables.length / rowCount);
+    const parsedCols = options && options.cols ? parseInt(options.cols, 10) : NaN;
+    const parsedRows = options && options.rows ? parseInt(options.rows, 10) : NaN;
+
+    if (!isNaN(parsedCols) && parsedCols > 0) {
+      colCount = parsedCols;
+    } else if (!isNaN(parsedRows) && parsedRows > 0) {
+      colCount = Math.ceil(tables.length / parsedRows);
     } else {
       colCount = Math.ceil(Math.sqrt(tables.length));
     }
