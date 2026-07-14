@@ -5,6 +5,8 @@ export class StateManager {
     this.state = JSON.parse(JSON.stringify(initialState));
     this.state.groups = this.state.groups || [];
     this.state.queries = this.state.queries || [];
+    this.state.notes = this.state.notes || [];
+    this.state.stickyNotes = this.state.stickyNotes || [];
     this.onStateChange = onStateChange;
 
     // Debounce timer for heavy persistence operations
@@ -18,6 +20,10 @@ export class StateManager {
 
   setState(newState, isRemote = false) {
     this.state = JSON.parse(JSON.stringify(newState));
+    this.state.groups = this.state.groups || [];
+    this.state.queries = this.state.queries || [];
+    this.state.notes = this.state.notes || [];
+    this.state.stickyNotes = this.state.stickyNotes || [];
     if (this.onStateChange) {
       this.onStateChange(this.state, isRemote);
     }
@@ -42,6 +48,7 @@ export class StateManager {
     this.state.relationships = this.state.relationships.filter(
       rel => rel.fromTable !== tableId && rel.toTable !== tableId
     );
+    this.state.notes = (this.state.notes || []).filter(n => n.tableId !== tableId);
     this.notify();
   }
 
@@ -187,6 +194,48 @@ export class StateManager {
   deleteQuery(queryId) {
     if (!this.state.queries) this.state.queries = [];
     this.state.queries = this.state.queries.filter(q => q.id !== queryId);
+    this.notify();
+  }
+
+  addNote(note) {
+    if (!this.state.notes) this.state.notes = [];
+    this.state.notes.push(note);
+    this.notify();
+  }
+
+  updateNote(noteId, updates) {
+    if (!this.state.notes) this.state.notes = [];
+    const index = this.state.notes.findIndex(n => n.id === noteId);
+    if (index !== -1) {
+      this.state.notes[index] = { ...this.state.notes[index], ...updates };
+      this.notify();
+    }
+  }
+
+  deleteNote(noteId) {
+    if (!this.state.notes) this.state.notes = [];
+    this.state.notes = this.state.notes.filter(n => n.id !== noteId);
+    this.notify();
+  }
+
+  addStickyNote(sticky) {
+    if (!this.state.stickyNotes) this.state.stickyNotes = [];
+    this.state.stickyNotes.push(sticky);
+    this.notify();
+  }
+
+  updateStickyNote(stickyId, updates) {
+    if (!this.state.stickyNotes) this.state.stickyNotes = [];
+    const index = this.state.stickyNotes.findIndex(s => s.id === stickyId);
+    if (index !== -1) {
+      this.state.stickyNotes[index] = { ...this.state.stickyNotes[index], ...updates };
+      this.notify();
+    }
+  }
+
+  deleteStickyNote(stickyId) {
+    if (!this.state.stickyNotes) this.state.stickyNotes = [];
+    this.state.stickyNotes = this.state.stickyNotes.filter(s => s.id !== stickyId);
     this.notify();
   }
 

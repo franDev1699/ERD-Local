@@ -11,6 +11,11 @@ export class Renderer {
     this.elements = domElements;
     this.onRelationshipDelete = config.onRelationshipDelete;
     this.onRelationshipCardinalityChange = config.onRelationshipCardinalityChange;
+    this.onNotesBadgeClick = config.onNotesBadgeClick;
+    this.onStickyNoteUpdate = config.onStickyNoteUpdate;
+    this.onStickyNoteDelete = config.onStickyNoteDelete;
+    this.currentUserId = null;
+    this.isAdmin = false;
     this.zoom = 1.0;
 
     // Cache: maps tableId -> DOM element for O(1) lookups
@@ -37,6 +42,7 @@ export class Renderer {
     this.renderGroups(appState, selectedGroupId);
     this.renderTables(appState, selectedTableIds);
     this.renderConnections(appState.relationships);
+    this.renderStickyNotes(appState.stickyNotes || []);
   }
 
   renderTables(appState, selectedTableIds) {
@@ -55,8 +61,11 @@ export class Renderer {
         rel => rel.fromTable === table.id && rel.fromField === fieldId
       );
 
+      const notes = (appState.notes || []).filter(n => n.tableId === table.id);
+      const notesCount = notes.length;
+
       // Build a lightweight snapshot to detect changes
-      const snapshot = this._buildTableSnapshot(table, isSelected, appState.relationships);
+      const snapshot = this._buildTableSnapshot(table, isSelected, appState.relationships, notesCount);
       const prevSnapshot = this._tableSnapshots.get(table.id);
 
       const existingEl = this._tableElements.get(table.id);
@@ -70,10 +79,10 @@ export class Renderer {
 
       if (existingEl) {
         // Data changed — update in place
-        this._updateTableElement(existingEl, table, isSelected, isFK);
+        this._updateTableElement(existingEl, table, isSelected, isFK, notesCount);
       } else {
         // New table — create and append
-        const tableEl = this._createTableElement(table, isSelected, isFK);
+        const tableEl = this._createTableElement(table, isSelected, isFK, notesCount);
         tablesContainer.appendChild(tableEl);
         this._tableElements.set(table.id, tableEl);
       }
@@ -91,7 +100,7 @@ export class Renderer {
     }
   }
 
-  _buildTableSnapshot(table, isSelected, relationships) {
+  _buildTableSnapshot(table, isSelected, relationships, notesCount = 0) {
     // Fast string-based snapshot for dirty-checking
     const fkFields = relationships
       .filter(r => r.fromTable === table.id)
@@ -100,10 +109,10 @@ export class Renderer {
     const fieldsKey = table.fields.map(f =>
       `${f.id}:${f.name}:${f.type}:${f.isPK ? 1 : 0}`
     ).join('|');
-    return `${table.name}:${table.x}:${table.y}:${table.color || ''}:${isSelected ? 1 : 0}:${fieldsKey}:fk=${fkFields}`;
+    return `${table.name}:${table.x}:${table.y}:${table.color || ''}:${isSelected ? 1 : 0}:${fieldsKey}:fk=${fkFields}:notes=${notesCount}`;
   }
 
-  _updateTableElement(tableEl, table, isSelected, isFKCallback) {
+  _updateTableElement(tableEl, table, isSelected, isFKCallback, notesCount = 0) {
     // Update class
     tableEl.className = `erd-table ${isSelected ? 'selected' : ''}`;
     tableEl.style.left = `${table.x}px`;
@@ -129,9 +138,28 @@ export class Renderer {
         fieldsEl.appendChild(this._createFieldElement(field, table.id, isFKCallback(field.id)));
       });
     }
+
+    // Update/Add notes badge
+    const existingBadge = tableEl.querySelector('.notes-badge');
+    if (notesCount > 0) {
+      if (existingBadge) {
+        existingBadge.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>${notesCount}`;
+      } else {
+        const badgeEl = document.createElement('div');
+        badgeEl.className = 'notes-badge';
+        badgeEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>${notesCount}`;
+        badgeEl.onclick = (e) => {
+          e.stopPropagation();
+          if (this.onNotesBadgeClick) this.onNotesBadgeClick(table.id, badgeEl);
+        };
+        tableEl.appendChild(badgeEl);
+      }
+    } else if (existingBadge) {
+      existingBadge.remove();
+    }
   }
 
-  _createTableElement(table, isSelected, isFKCallback) {
+  _createTableElement(table, isSelected, isFKCallback, notesCount = 0) {
     const tableEl = document.createElement("div");
     tableEl.className = `erd-table ${isSelected ? 'selected' : ''}`;
     tableEl.style.left = `${table.x}px`;
@@ -159,7 +187,145 @@ export class Renderer {
     });
     tableEl.appendChild(fieldsEl);
 
+    // Notes badge
+    if (notesCount > 0) {
+      const badgeEl = document.createElement('div');
+      badgeEl.className = 'notes-badge';
+      badgeEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>${notesCount}`;
+      badgeEl.onclick = (e) => {
+        e.stopPropagation();
+        if (this.onNotesBadgeClick) {
+          this.onNotesBadgeClick(table.id, badgeEl);
+        }
+      };
+      tableEl.appendChild(badgeEl);
+    }
+
     return tableEl;
+  }
+
+  renderStickyNotes(stickyNotes) {
+    const container = this.elements.stickyNotesContainer || document.getElementById("erd-sticky-notes-container");
+    if (!container) return;
+
+    const currentStickyIds = new Set();
+
+    stickyNotes.forEach(sticky => {
+      currentStickyIds.add(sticky.id);
+      
+      let el = container.querySelector(`[data-id="${sticky.id}"]`);
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "sticky-note";
+        el.dataset.id = sticky.id;
+        container.appendChild(el);
+      }
+
+      // Update positions
+      el.style.left = `${sticky.x}px`;
+      el.style.top = `${sticky.y}px`;
+      el.style.backgroundColor = sticky.color || "#fef08a";
+
+      const authorText = sticky.authorName ? `Por ${sticky.authorName}` : "Nota";
+      const isEditable = this.isAdmin || sticky.authorId === this.currentUserId;
+      
+      el.innerHTML = `
+        <div class="sticky-note-header">
+          <span>${authorText}</span>
+          <div class="sticky-note-controls">
+            ${isEditable ? `
+              <button class="sticky-note-btn edit-btn" title="Editar texto">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              </button>
+              <button class="sticky-note-btn delete-btn" title="Eliminar nota">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              </button>
+            ` : ""}
+          </div>
+        </div>
+        <div class="sticky-note-body">${sticky.text || "Escribe algo..."}</div>
+        ${isEditable ? `
+          <div class="sticky-note-colors">
+            <div class="sticky-color-dot" data-color="#fef08a" style="background-color: #fef08a;"></div>
+            <div class="sticky-color-dot" data-color="#fbcfe8" style="background-color: #fbcfe8;"></div>
+            <div class="sticky-color-dot" data-color="#bbf7d0" style="background-color: #bbf7d0;"></div>
+            <div class="sticky-color-dot" data-color="#bfdbfe" style="background-color: #bfdbfe;"></div>
+          </div>
+        ` : ""}
+      `;
+
+      if (isEditable) {
+        const deleteBtn = el.querySelector(".delete-btn");
+        if (deleteBtn) {
+          deleteBtn.onclick = (e) => {
+            e.stopPropagation();
+            if (this.onStickyNoteDelete) {
+              this.onStickyNoteDelete(sticky.id);
+            }
+          };
+        }
+
+        const editBtn = el.querySelector(".edit-btn");
+        if (editBtn) {
+          editBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.enterStickyNoteEditMode(el, sticky);
+          };
+        }
+
+        // Color dots click
+        el.querySelectorAll(".sticky-color-dot").forEach(dot => {
+          dot.onclick = (e) => {
+            e.stopPropagation();
+            const color = dot.dataset.color;
+            if (this.onStickyNoteUpdate) {
+              this.onStickyNoteUpdate(sticky.id, { color });
+            }
+          };
+        });
+      }
+    });
+
+    // Remove deleted sticky notes
+    container.querySelectorAll(".sticky-note").forEach(el => {
+      const id = el.dataset.id;
+      if (!currentStickyIds.has(id)) {
+        el.remove();
+      }
+    });
+  }
+
+  enterStickyNoteEditMode(el, sticky) {
+    const bodyEl = el.querySelector(".sticky-note-body");
+    if (!bodyEl) return;
+
+    bodyEl.innerHTML = `<textarea class="sticky-note-textarea">${sticky.text || ""}</textarea>`;
+    const textarea = bodyEl.querySelector(".sticky-note-textarea");
+    textarea.focus();
+    textarea.select();
+
+    const saveEdit = () => {
+      const newText = textarea.value.trim();
+      if (newText !== sticky.text) {
+        if (this.onStickyNoteUpdate) {
+          this.onStickyNoteUpdate(sticky.id, { text: newText });
+        }
+      } else {
+        bodyEl.innerHTML = sticky.text || "Escribe algo...";
+      }
+    };
+
+    textarea.onblur = saveEdit;
+    textarea.onkeydown = (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        textarea.blur();
+      }
+      if (e.key === "Escape") {
+        textarea.value = sticky.text || "";
+        textarea.blur();
+      }
+    };
   }
 
   _createFieldElement(field, tableId, isFK) {

@@ -15,6 +15,7 @@ import { AiController } from './AiController.js';
 import { CollabController } from './CollabController.js';
 import { DiagramController } from './DiagramController.js';
 import { ToolbarController } from './ToolbarController.js';
+import { NotesController } from './NotesController.js';
 
 export class AppController {
   constructor(config) {
@@ -62,7 +63,10 @@ export class AppController {
 
     this.renderer = new Renderer(config.dom, {
       onRelationshipDelete: (id) => this.diagramController.deleteRelationship(id),
-      onRelationshipCardinalityChange: (id, cardinality) => this.diagramController.updateRelationshipCardinality(id, cardinality)
+      onRelationshipCardinalityChange: (id, cardinality) => this.diagramController.updateRelationshipCardinality(id, cardinality),
+      onNotesBadgeClick: (tableId, badgeEl) => this.notesController?.showNotesPopover(tableId, badgeEl),
+      onStickyNoteUpdate: (stickyId, updates) => this.notesController?.updateStickyNote(stickyId, updates),
+      onStickyNoteDelete: (stickyId) => this.notesController?.deleteStickyNote(stickyId)
     });
 
     this.sidebarEditor = new SidebarEditor({
@@ -119,6 +123,17 @@ export class AppController {
       onIncomingStateReset: () => this.diagramController.refreshUI()
     });
 
+    this.notesController = new NotesController({
+      stateManager: this.stateManager,
+      uiManager: this.uiManager,
+      collabController: this.collabController,
+      onHistoryPush: (prevState) => {
+        const currentState = this.stateManager.getState();
+        this.history.push(prevState || currentState, currentState);
+        this.toolbarController?.updateHistoryButtons();
+      }
+    });
+
     // Interaction Controller
     this.interactionController = new InteractionController({
       canvasManager: this.canvasManager,
@@ -145,7 +160,12 @@ export class AppController {
       },
       onZoomChange: () => {
         this.diagramController.refreshCanvas();
-      }
+      },
+      onTableContextMenu: (tableId, x, y) => this.notesController.showTableContextMenu(tableId, x, y),
+      onStickyNoteContextMenu: (stickyId, x, y) => this.notesController.showStickyNoteContextMenu(stickyId, x, y),
+      onCanvasContextMenu: (coords, x, y) => this.notesController.showCanvasContextMenu(coords, x, y),
+      onStickyNoteUpdate: (stickyId, updates) => this.notesController.updateStickyNote(stickyId, updates),
+      onStickyNoteDelete: (stickyId) => this.notesController.deleteStickyNote(stickyId)
     });
 
     // Toolbar Controller
@@ -164,6 +184,8 @@ export class AppController {
   }
 
   async init() {
+    window.appInstance = this;
+
     if (!this.projectId) {
       this.collabController.initDashboard();
       this.aiController.init();
@@ -179,8 +201,14 @@ export class AppController {
     // Setup Collaboration
     await this.collabController.initCollab();
 
+    if (this.collabController.myUser) {
+      this.renderer.currentUserId = this.collabController.myUser.userId;
+      this.renderer.isAdmin = this.collabController.myUser.is_admin;
+    }
+
     // Initial Render & Setup
     this.diagramController.refreshUI();
+    this.notesController?.refreshGlobalNotes();
     this.interactionController.init();
     this.toolbarController.init();
     
@@ -209,6 +237,7 @@ export class AppController {
 
   handleStateChange(newState, isRemote = false) {
     this.diagramController.refreshUI();
+    this.notesController?.refreshGlobalNotes();
 
     if (this._saveDebounceTimer) clearTimeout(this._saveDebounceTimer);
     this._saveDebounceTimer = setTimeout(() => {

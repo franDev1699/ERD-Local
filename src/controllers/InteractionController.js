@@ -20,6 +20,11 @@ export class InteractionController {
     this.getSelectedTableIds = config.getSelectedTableIds;
     this.getSelectedGroupId = config.getSelectedGroupId;
     this.onZoomChange = config.onZoomChange;
+    this.onTableContextMenu = config.onTableContextMenu;
+    this.onStickyNoteContextMenu = config.onStickyNoteContextMenu;
+    this.onCanvasContextMenu = config.onCanvasContextMenu;
+    this.onStickyNoteUpdate = config.onStickyNoteUpdate;
+    this.onStickyNoteDelete = config.onStickyNoteDelete;
 
     this.isSpacePressed = false;
     this.selectionStartCanvas = null;
@@ -31,6 +36,9 @@ export class InteractionController {
     this.draggedTableStartPosition = { x: 0, y: 0 };
     this.dragOffset = { x: 0, y: 0 };
     this.draggedTables = [];
+    
+    this.draggedStickyId = null;
+    this.draggedStickyStartPosition = { x: 0, y: 0 };
     
     // Group dragging & resizing properties
     this.draggedGroupId = null;
@@ -200,8 +208,72 @@ export class InteractionController {
       if (this.wasPanning) {
         e.preventDefault();
         this.wasPanning = false;
+        return;
+      }
+
+      // Check if clicked inside a table
+      const tableEl = e.target.closest(".erd-table");
+      if (tableEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        const tableId = tableEl.dataset.id;
+        if (this.onTableContextMenu) {
+          this.onTableContextMenu(tableId, e.clientX, e.clientY);
+        }
+        return;
+      }
+
+      // Check if clicked inside a sticky note
+      const stickyEl = e.target.closest(".sticky-note");
+      if (stickyEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        const stickyId = stickyEl.dataset.id;
+        if (this.onStickyNoteContextMenu) {
+          this.onStickyNoteContextMenu(stickyId, e.clientX, e.clientY);
+        }
+        return;
+      }
+
+      // Clicked on canvas background
+      if (e.target === this.dom.erdCanvas || e.target === this.dom.canvasContainer || e.target.closest(".tables-container") || e.target.closest(".connections-svg")) {
+        e.preventDefault();
+        const rect = this.dom.erdCanvas.getBoundingClientRect();
+        const zoom = this.canvasManager.getZoom();
+        const canvasX = (e.clientX - rect.left) / zoom;
+        const canvasY = (e.clientY - rect.top) / zoom;
+        if (this.onCanvasContextMenu) {
+          this.onCanvasContextMenu({ x: canvasX, y: canvasY }, e.clientX, e.clientY);
+        }
       }
     });
+
+    // Mousedown listener for sticky note dragging
+    const stickyContainer = document.getElementById("erd-sticky-notes-container");
+    if (stickyContainer) {
+      stickyContainer.addEventListener("mousedown", (e) => {
+        const stickyEl = e.target.closest(".sticky-note");
+        if (stickyEl) {
+          // Avoid dragging if clicking controls or inputs
+          if (e.target.closest(".sticky-note-btn") || e.target.closest(".sticky-color-dot") || e.target.closest(".sticky-note-textarea")) {
+            return;
+          }
+          e.stopPropagation();
+          const stickyId = stickyEl.dataset.id;
+          const rect = stickyEl.getBoundingClientRect();
+          this.dragOffset.x = e.clientX - rect.left;
+          this.dragOffset.y = e.clientY - rect.top;
+          this.draggedStickyId = stickyId;
+          
+          const state = this.stateManager.getState();
+          const sticky = state.stickyNotes.find(s => s.id === stickyId);
+          if (sticky) {
+            this.draggedStickyStartPosition = { x: sticky.x, y: sticky.y };
+          }
+          document.body.style.userSelect = "none";
+        }
+      });
+    }
 
     // Delegated canvas actions: Dragging tables, starting connections, selecting tables
     this.dom.tablesContainer.addEventListener("mousedown", (e) => {
@@ -372,6 +444,11 @@ export class InteractionController {
         this._handleTableDrag(e);
       }
 
+      // 2.5 Sticky Note Dragging
+      if (this.draggedStickyId) {
+        this._handleStickyNoteDrag(e);
+      }
+
       // 3. Temporary Connection Line
       if (this.activeConnectionSource) {
         this._handleConnectionDrag(e);
@@ -501,6 +578,24 @@ export class InteractionController {
           clearTimeout(this._dragRenderTimer);
           this._dragRenderTimer = null;
         }
+        document.body.style.userSelect = "auto";
+      }
+
+      // End sticky note drag
+      if (this.draggedStickyId) {
+        const state = this.stateManager.getState();
+        const sticky = state.stickyNotes.find(s => s.id === this.draggedStickyId);
+        if (sticky && (sticky.x !== this.draggedStickyStartPosition.x || sticky.y !== this.draggedStickyStartPosition.y)) {
+          const prevState = JSON.parse(JSON.stringify(state));
+          const prevSticky = prevState.stickyNotes.find(s => s.id === this.draggedStickyId);
+          if (prevSticky) {
+            prevSticky.x = this.draggedStickyStartPosition.x;
+            prevSticky.y = this.draggedStickyStartPosition.y;
+          }
+          this.onHistoryPush(prevState);
+          this.stateManager.notify();
+        }
+        this.draggedStickyId = null;
         document.body.style.userSelect = "auto";
       }
 
@@ -921,6 +1016,31 @@ export class InteractionController {
     const isCumulative = e.shiftKey || e.ctrlKey;
     if (this.onSelectionArea) {
       this.onSelectionArea(selectedIds, isCumulative);
+    }
+  }
+
+  _handleStickyNoteDrag(e) {
+    const canvasRect = this.dom.erdCanvas.getBoundingClientRect();
+    const zoom = this.canvasManager.getZoom();
+    let newX = (e.clientX - canvasRect.left - this.dragOffset.x) / zoom;
+    let newY = (e.clientY - canvasRect.top - this.dragOffset.y) / zoom;
+
+    const GRID_SIZE = 10;
+    newX = Math.round(newX / GRID_SIZE) * GRID_SIZE;
+    newY = Math.round(newY / GRID_SIZE) * GRID_SIZE;
+
+    const container = document.getElementById("erd-sticky-notes-container");
+    const el = container ? container.querySelector(`[data-id="${this.draggedStickyId}"]`) : null;
+    if (el) {
+      el.style.left = `${newX}px`;
+      el.style.top = `${newY}px`;
+    }
+
+    const state = this.stateManager.getState();
+    const sticky = state.stickyNotes.find(s => s.id === this.draggedStickyId);
+    if (sticky) {
+      sticky.x = newX;
+      sticky.y = newY;
     }
   }
 }

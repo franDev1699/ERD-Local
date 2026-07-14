@@ -17,6 +17,7 @@ const config = {
     canvasContainer: document.getElementById("canvas-container"),
     erdCanvas: document.getElementById("erd-canvas"),
     tablesContainer: document.getElementById("erd-tables-container"),
+    stickyNotesContainer: document.getElementById("erd-sticky-notes-container"),
     connectionsSvg: document.getElementById("erd-connections-svg"),
     zoomText: document.getElementById("zoom-level"),
     tablesListContainer: document.getElementById("tables-list-container"),
