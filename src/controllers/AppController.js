@@ -52,6 +52,7 @@ export class AppController {
       sqlModal: config.dom.sqlModal,
       imageModal: config.dom.imageModal
     });
+    window.UIManager = this.uiManager;
 
     // Diagram Controller (Manages diagrams layout, selection and mutations)
     this.diagramController = new DiagramController({

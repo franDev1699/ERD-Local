@@ -1,5 +1,6 @@
 // src/db/FeedbackRepository.js
 const db = require('./connection');
+const crypto = require('crypto');
 
 class FeedbackRepository {
   static createFeedback({ userId, type, subject, description }) {
