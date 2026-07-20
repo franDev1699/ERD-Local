@@ -137,6 +137,9 @@
 					<div class="toolbar-right">
 						<div class="tb-group">
 							<div class="tb-group-buttons">
+								<button id="btn-feedback-trigger" class="btn btn-tb" title="Comentarios y Sugerencias">
+									<i data-lucide="message-square"></i> Comentarios
+								</button>
 								<button id="btn-ai-config-trigger" class="btn btn-tb" title="Configuración de IA y Prompts">
 									<i data-lucide="settings"></i> Configuración
 								</button>
@@ -876,6 +879,88 @@
 					<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
 						<button id="btn-cancel-change-password" class="btn btn-secondary" style="padding: 6px 16px; border-radius: 4px; font-size: 0.85rem;">Cancelar</button>
 						<button id="btn-save-change-password" class="btn btn-primary" style="padding: 6px 16px; border-radius: 4px; font-size: 0.85rem; font-weight: 600;">Guardar</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Feedback / Suggestions Modal -->
+		<div id="feedback-modal" class="modal hidden" style="z-index: 1050;">
+			<div class="modal-content" style="max-width: 600px;">
+				<div class="modal-header">
+					<h2 id="feedback-modal-title">Comentarios y Sugerencias</h2>
+					<button id="btn-close-feedback-modal" class="btn-icon"><i data-lucide="x"></i></button>
+				</div>
+				<div class="modal-body" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 20px;">
+					<!-- Tabs: New / My Feedback / Manage -->
+					<div class="feedback-tabs" style="display: flex; gap: 0; border-bottom: 1px solid var(--color-border); margin-bottom: 16px;">
+						<button class="feedback-tab active" data-tab="new" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid var(--color-primary); border-radius: 0; color: var(--color-text-main); font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+							<i data-lucide="plus" style="width: 14px; height: 14px; display: inline; vertical-align: middle; margin-right: 6px;"></i>
+							Nuevo
+						</button>
+						<button class="feedback-tab" data-tab="my" style="flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--color-text-muted); font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+							<i data-lucide="file-text" style="width: 14px; height: 14px; display: inline; vertical-align: middle; margin-right: 6px;"></i>
+							Mis Comentarios
+						</button>
+						<button id="btn-feedback-manage-tab" class="feedback-tab" data-tab="manage" style="display: none; flex: 1; padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--color-text-muted); font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+							<i data-lucide="shield" style="width: 14px; height: 14px; display: inline; vertical-align: middle; margin-right: 6px;"></i>
+							Gestionar
+						</button>
+					</div>
+					
+<!-- New Feedback Form -->
+					<div id="feedback-tab-new" class="feedback-panel">
+						<div style="display: flex; flex-direction: column; gap: 14px;">
+							<div>
+								<label class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--color-text-main);">Tipo de comentario</label>
+								<div style="display: flex; gap: 8px; flex-wrap: wrap;" id="feedback-type-chips-container">
+									<input type="radio" name="feedback-type" id="fbs-type-bug" value="bug" style="display: none;" />
+									<label for="fbs-type-bug" class="feedback-type-chip" data-type="bug" style="display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 20px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-size: 0.8rem; cursor: pointer; transition: all 0.15s; user-select: none;">
+										<i data-lucide="bug" style="width: 13px; height: 13px;"></i> Bug
+									</label>
+									<input type="radio" name="feedback-type" id="fbs-type-suggestion" value="suggestion" checked style="display: none;" />
+									<label for="fbs-type-suggestion" class="feedback-type-chip" data-type="suggestion" style="display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 20px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-size: 0.8rem; cursor: pointer; transition: all 0.15s; user-select: none;">
+										<i data-lucide="lightbulb" style="width: 13px; height: 13px;"></i> Sugerencia
+									</label>
+									<input type="radio" name="feedback-type" id="fbs-type-feature" value="feature" style="display: none;" />
+									<label for="fbs-type-feature" class="feedback-type-chip" data-type="feature" style="display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 20px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-size: 0.8rem; cursor: pointer; transition: all 0.15s; user-select: none;">
+										<i data-lucide="zap" style="width: 13px; height: 13px;"></i> Nueva Funcionalidad
+									</label>
+									<input type="radio" name="feedback-type" id="fbs-type-other" value="other" style="display: none;" />
+									<label for="fbs-type-other" class="feedback-type-chip" data-type="other" style="display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 20px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-size: 0.8rem; cursor: pointer; transition: all 0.15s; user-select: none;">
+										<i data-lucide="message-circle" style="width: 13px; height: 13px;"></i> Otro
+									</label>
+								</div>
+							</div>
+							<div>
+								<label class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--color-text-main);">Asunto</label>
+								<input type="text" id="feedback-subject" class="form-control" placeholder="Resumen breve del comentario..." style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 8px 12px;" />
+							</div>
+							<div>
+								<label class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--color-text-main);">Descripción</label>
+								<textarea id="feedback-description" class="form-control" placeholder="Describe el problema, sugerencia o funcionalidad..." rows="4" style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 8px 12px; resize: vertical;"></textarea>
+							</div>
+							<div style="display: flex; justify-content: flex-end;">
+								<button id="btn-submit-feedback" class="btn btn-primary" style="font-size: 0.85rem;">
+									<i data-lucide="send" style="width: 14px; height: 14px; display: inline; vertical-align: middle; margin-right: 6px;"></i>
+									Enviar Comentario
+								</button>
+							</div>
+						</div>
+					</div>
+					
+					<!-- My Feedback Panel -->
+					<div id="feedback-tab-my" class="feedback-panel hidden">
+						<div id="feedback-my-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 350px; overflow-y: auto;">
+							<p style="color: var(--color-text-muted); font-size: 0.85rem; text-align: center; padding: 20px 0;">No tienes comentarios aún.</p>
+						</div>
+					</div>
+					
+					<!-- Admin Manage Panel -->
+					<div id="feedback-tab-manage" class="feedback-panel hidden">
+						<div id="feedback-manage-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 350px; overflow-y: auto;">
+							<p style="color: var(--color-text-muted); font-size: 0.85rem; text-align: center; padding: 20px 0;">Cargando comentarios...</p>
+						</div>
 					</div>
 				</div>
 			</div>

@@ -7,6 +7,7 @@ import { Renderer } from '../ui/Renderer.js';
 import { CanvasManager } from '../ui/CanvasManager.js';
 import { SidebarEditor } from '../ui/SidebarEditor.js';
 import { UIManager } from '../ui/UIManager.js';
+import { FeedbackManager } from '../ui/FeedbackManager.js';
 import { InteractionController } from './InteractionController.js';
 
 // Special Sub-controllers
@@ -233,6 +234,40 @@ export class AppController {
     // Setup query manager and AI configurations
     this.queryController.init();
     this.aiController.init();
+
+    // Initialize feedback manager after user info is available
+    this.initFeedbackManager();
+  }
+
+  initFeedbackManager() {
+    const feedbackModal = document.getElementById('feedback-modal');
+    if (!feedbackModal) return;
+
+    this.feedbackManager = new FeedbackManager({
+      modal: feedbackModal,
+      title: document.getElementById('feedback-modal-title'),
+      closeBtn: document.getElementById('btn-close-feedback-modal'),
+      myList: document.getElementById('feedback-my-list'),
+      manageList: document.getElementById('feedback-manage-list'),
+      form: document.getElementById('feedback-form'),
+      subjectInput: document.getElementById('feedback-subject'),
+      descriptionInput: document.getElementById('feedback-description'),
+      submitBtn: document.getElementById('btn-submit-feedback'),
+      tabs: Array.from(document.querySelectorAll('.feedback-tab')),
+      typeChips: null,
+      manageTab: document.getElementById('btn-feedback-manage-tab'),
+      currentUser: this.collabController?.myUser || null,
+    });
+
+    this.feedbackManager.initListeners();
+
+    // Wire up the toolbar button to open the modal
+    const btnFeedback = document.getElementById('btn-feedback-trigger');
+    if (btnFeedback) {
+      btnFeedback.addEventListener('click', () => {
+        this.feedbackManager.open();
+      });
+    }
   }
 
   handleStateChange(newState, isRemote = false) {

@@ -13,6 +13,7 @@ const ProjectRepository = require('./src/db/ProjectRepository');
 const AiPromptRepository = require('./src/db/AiPromptRepository');
 const SystemSettingsRepository = require('./src/db/SystemSettingsRepository');
 const UserAiConfigRepository = require('./src/db/UserAiConfigRepository');
+const FeedbackRepository = require('./src/db/FeedbackRepository');
 const { hashPassword, verifyPassword } = require('./src/db/auth');
 const rateLimiter = require('./src/security/rateLimiter');
 const { validatePassword } = require('./src/security/passwordValidator');
@@ -2541,6 +2542,127 @@ const server = http.createServer(async (req, res) => {
       }
       return;
     }
+
+    // ============================================
+    // FEEDBACK / SUGGESTIONS API
+    // ============================================
+
+    // GET /api/feedback - List feedback (own or all for admins)
+    if (req.method === 'GET' && cleanUrl === '/api/feedback') {
+      try {
+        let results;
+        if (session.is_admin === 1) {
+          results = FeedbackRepository.getAllFeedback();
+        } else {
+          results = FeedbackRepository.getFeedbackByUserId(session.user_id, false);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(results));
+      } catch (err) {
+        console.error('[server.js] Error al obtener feedback:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/feedback - Create new feedback
+    if (req.method === 'POST' && cleanUrl === '/api/feedback') {
+      try {
+        const payload = await readJsonBody(req);
+        if (!payload.type || !['bug', 'suggestion', 'feature', 'other'].includes(payload.type)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Tipo de feedback inválido.' }));
+          return;
+        }
+        if (!payload.subject || payload.subject.trim().length < 3) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'El asunto debe tener al menos 3 caracteres.' }));
+          return;
+        }
+        if (!payload.description || payload.description.trim().length < 10) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'La descripción debe tener al menos 10 caracteres.' }));
+          return;
+        }
+
+        const feedback = FeedbackRepository.createFeedback({
+          userId: session.user_id,
+          type: payload.type,
+          subject: payload.subject,
+          description: payload.description,
+        });
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: feedback }));
+      } catch (err) {
+        console.error('[server.js] Error al crear feedback:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // PUT /api/feedback/:id - Update feedback status (admins only)
+    if (req.method === 'PUT' && cleanUrl.startsWith('/api/feedback/')) {
+      try {
+        const itemId = cleanUrl.split('/').pop();
+        if (itemId === 'feedback') {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No encontrado' }));
+          return;
+        }
+        if (session.is_admin !== 1) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Solo administradores pueden actualizar feedback.' }));
+          return;
+        }
+        const payload = await readJsonBody(req);
+        if (!payload.status || !['new', 'in_progress', 'resolved', 'closed'].includes(payload.status)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Estado inválido.' }));
+          return;
+        }
+        const updated = FeedbackRepository.updateStatus(itemId, payload.status);
+        if (!updated) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Feedback no encontrado.' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: updated }));
+      } catch (err) {
+        console.error('[server.js] Error al actualizar feedback:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // DELETE /api/feedback/:id - Delete feedback (admins only)
+    if (req.method === 'DELETE' && cleanUrl.startsWith('/api/feedback/')) {
+      try {
+        const itemId = cleanUrl.split('/').pop();
+        if (itemId === 'feedback') {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No encontrado' }));
+          return;
+        }
+        if (session.is_admin !== 1) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Solo administradores pueden eliminar feedback.' }));
+          return;
+        }
+        FeedbackRepository.deleteFeedback(itemId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        console.error('[server.js] Error al eliminar feedback:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
   }
 
   // 4. STATIC PAGES & FILE SERVING
