@@ -19,6 +19,8 @@ export class InteractionController {
     this.onSelectionArea = config.onSelectionArea;
     this.getSelectedTableIds = config.getSelectedTableIds;
     this.getSelectedGroupId = config.getSelectedGroupId;
+    this.getSelectedRelationshipId = config.getSelectedRelationshipId;
+    this.onRelationshipDelete = config.onRelationshipDelete;
     this.onZoomChange = config.onZoomChange;
     this.onTableContextMenu = config.onTableContextMenu;
     this.onStickyNoteContextMenu = config.onStickyNoteContextMenu;
@@ -868,6 +870,26 @@ export class InteractionController {
             this.canvasManager.getZoom()
           );
           this.uiManager.showToast("Conexión cancelada.", "info");
+        }
+      }
+
+      // Delete / Backspace key for deleting selected relationship
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const activeEl = document.activeElement;
+        const isInput = activeEl && (
+          activeEl.tagName === "INPUT" ||
+          activeEl.tagName === "TEXTAREA" ||
+          activeEl.isContentEditable ||
+          activeEl.classList.contains("sticky-note-textarea")
+        );
+        if (!isInput) {
+          const selectedRelId = this.getSelectedRelationshipId ? this.getSelectedRelationshipId() : null;
+          if (selectedRelId) {
+            e.preventDefault();
+            if (this.onRelationshipDelete) {
+              this.onRelationshipDelete(selectedRelId);
+            }
+          }
         }
       }
 

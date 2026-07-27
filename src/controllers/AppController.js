@@ -65,6 +65,7 @@ export class AppController {
 
     this.renderer = new Renderer(config.dom, {
       onRelationshipDelete: (id) => this.diagramController.deleteRelationship(id),
+      onRelationshipSelect: (id) => this.diagramController.selectRelationship(id),
       onRelationshipCardinalityChange: (id, cardinality) => this.diagramController.updateRelationshipCardinality(id, cardinality),
       onNotesBadgeClick: (tableId, badgeEl) => this.notesController?.showNotesPopover(tableId, badgeEl),
       onStickyNoteUpdate: (stickyId, updates) => this.notesController?.updateStickyNote(stickyId, updates),
@@ -149,6 +150,8 @@ export class AppController {
       onSelectionArea: (ids, isCumulative) => this.diagramController.handleSelectionArea(ids, isCumulative),
       getSelectedTableIds: () => this.diagramController.selectedTableIds,
       getSelectedGroupId: () => this.diagramController.selectedGroupId,
+      getSelectedRelationshipId: () => this.diagramController.selectedRelationshipId,
+      onRelationshipDelete: (id) => this.diagramController.deleteRelationship(id),
       onHistoryPush: (prevState) => {
         const currentState = this.stateManager.getState();
         this.history.push(prevState || currentState, currentState);

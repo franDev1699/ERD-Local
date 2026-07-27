@@ -10,6 +10,7 @@ export class Renderer {
   constructor(domElements, config = {}) {
     this.elements = domElements;
     this.onRelationshipDelete = config.onRelationshipDelete;
+    this.onRelationshipSelect = config.onRelationshipSelect;
     this.onRelationshipCardinalityChange = config.onRelationshipCardinalityChange;
     this.onNotesBadgeClick = config.onNotesBadgeClick;
     this.onStickyNoteUpdate = config.onStickyNoteUpdate;
@@ -37,11 +38,11 @@ export class Renderer {
     return this._groupElements.get(groupId) || null;
   }
 
-  render(appState, selectedTableIds, selectedGroupId, zoom = 1.0) {
+  render(appState, selectedTableIds, selectedGroupId, zoom = 1.0, selectedRelationshipId = null) {
     this.zoom = zoom;
     this.renderGroups(appState, selectedGroupId);
     this.renderTables(appState, selectedTableIds);
-    this.renderConnections(appState.relationships);
+    this.renderConnections(appState.relationships, selectedRelationshipId);
     this.renderStickyNotes(appState.stickyNotes || []);
   }
 
@@ -352,7 +353,7 @@ export class Renderer {
     return fieldRow;
   }
 
-  renderConnections(relationships) {
+  renderConnections(relationships, selectedRelationshipId = null) {
     const { connectionsSvg } = this.elements;
 
     // Remove old connection groups (each <g> contains paths + labels)
@@ -518,8 +519,9 @@ export class Renderer {
       }
       allChannelXs.push(channelX);
 
+      const isSelected = (r.id === selectedRelationshipId);
       const d = this._buildOrthogonalPath(start.x, start.y, end.x, end.y, channelX, CORNER_RADIUS);
-      this._drawConnectionPath(d, r.id, r.cardinality, start, end, fromSide, toSide);
+      this._drawConnectionPath(d, r.id, r.cardinality, start, end, fromSide, toSide, isSelected, channelX);
     });
   }
 
@@ -579,10 +581,13 @@ export class Renderer {
     ].join(' ');
   }
 
-  _drawConnectionPath(d, relationshipId, cardinality, start, end, fromSide, toSide) {
+  _drawConnectionPath(d, relationshipId, cardinality, start, end, fromSide, toSide, isSelected = false, channelX = null) {
     const { connectionsSvg } = this.elements;
     const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
     group.dataset.id = relationshipId;
+    if (isSelected) {
+      group.classList.add("selected");
+    }
 
     const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
     const glowPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -593,11 +598,11 @@ export class Renderer {
     hitPath.dataset.id = relationshipId;
 
     glowPath.setAttribute("d", d);
-    glowPath.className.baseVal = "connection-path-glow";
+    glowPath.className.baseVal = `connection-path-glow ${isSelected ? 'selected' : ''}`;
     glowPath.dataset.id = relationshipId;
 
     mainPath.setAttribute("d", d);
-    mainPath.className.baseVal = "connection-path";
+    mainPath.className.baseVal = `connection-path ${isSelected ? 'selected' : ''}`;
     mainPath.dataset.id = relationshipId;
     mainPath.setAttribute("marker-end", "url(#arrow)");
 
@@ -607,8 +612,8 @@ export class Renderer {
         return;
       }
       e.stopPropagation();
-      if (this.onRelationshipDelete) {
-        this.onRelationshipDelete(relationshipId);
+      if (this.onRelationshipSelect) {
+        this.onRelationshipSelect(relationshipId);
       }
     });
 
@@ -621,6 +626,42 @@ export class Renderer {
     group.appendChild(hitPath);
     group.appendChild(glowPath);
     group.appendChild(mainPath);
+
+    // Interactive connection nodes (.connection-node) at endpoints and channel inflection points
+    const points = [{ x: start.x, y: start.y }];
+    if (channelX !== undefined && channelX !== null) {
+      if (Math.abs(channelX - start.x) >= 2) {
+        points.push({ x: channelX, y: start.y });
+      }
+      if (Math.abs(channelX - end.x) >= 2 && Math.abs(start.y - end.y) >= 2) {
+        points.push({ x: channelX, y: end.y });
+      }
+    }
+    points.push({ x: end.x, y: end.y });
+
+    points.forEach(pt => {
+      const node = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      node.setAttribute("cx", pt.x);
+      node.setAttribute("cy", pt.y);
+      node.setAttribute("r", isSelected ? "6.5" : "5");
+      node.className.baseVal = `connection-node ${isSelected ? 'selected' : ''}`;
+      node.dataset.id = relationshipId;
+
+      node.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (this.onRelationshipSelect) {
+          this.onRelationshipSelect(relationshipId);
+        }
+      });
+
+      node.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._showCardinalityPopover(relationshipId, e.clientX, e.clientY);
+      });
+
+      group.appendChild(node);
+    });
 
     if (cardinality) {
       const parts = cardinality.split(':');
@@ -680,6 +721,11 @@ export class Renderer {
         ${options.map(opt => `
           <button class="cardinality-option" data-value="${opt.value}">${opt.label}</button>
         `).join('')}
+        <div class="cardinality-popover-divider"></div>
+        <button class="cardinality-option cardinality-option-delete" data-action="delete">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+          Eliminar relación
+        </button>
       </div>
     `;
 
@@ -692,7 +738,7 @@ export class Renderer {
 
     popover.querySelector('.cardinality-popover-close').addEventListener('click', close);
 
-    popover.querySelectorAll('.cardinality-option').forEach(btn => {
+    popover.querySelectorAll('.cardinality-option[data-value]').forEach(btn => {
       btn.addEventListener('click', () => {
         if (this.onRelationshipCardinalityChange) {
           this.onRelationshipCardinalityChange(relationshipId, btn.dataset.value);
@@ -700,6 +746,16 @@ export class Renderer {
         close();
       });
     });
+
+    const deleteBtn = popover.querySelector('.cardinality-option-delete');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => {
+        if (this.onRelationshipDelete) {
+          this.onRelationshipDelete(relationshipId);
+        }
+        close();
+      });
+    }
 
     setTimeout(() => {
       const handler = (e) => {

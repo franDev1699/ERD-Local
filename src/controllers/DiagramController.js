@@ -11,6 +11,7 @@ export class DiagramController {
 
     this.selectedTableIds = new Set();
     this.selectedGroupId = null;
+    this.selectedRelationshipId = null;
 
     this.renderer = null;
     this.sidebarEditor = null;
@@ -47,7 +48,7 @@ export class DiagramController {
     const state = this.stateManager.getState();
     this.adjustCanvasSizeToContent(state.tables, state.groups);
     const zoom = this.canvasManager.getZoom();
-    this.renderer.render(state, this.selectedTableIds, this.selectedGroupId, zoom);
+    this.renderer.render(state, this.selectedTableIds, this.selectedGroupId, zoom, this.selectedRelationshipId);
   }
 
   refreshSidebar() {
@@ -127,6 +128,7 @@ export class DiagramController {
       }
     }
     this.selectedGroupId = null;
+    this.selectedRelationshipId = null;
 
     const tables = this.dom.tablesContainer.querySelectorAll(".erd-table");
     tables.forEach(tableEl => {
@@ -153,6 +155,7 @@ export class DiagramController {
     if (this.selectedGroupId === groupId) return;
     this.selectedGroupId = groupId;
     this.selectedTableIds.clear();
+    this.selectedRelationshipId = null;
 
     const groups = this.dom.canvasContainer.querySelectorAll(".erd-group");
     groups.forEach(groupEl => {
@@ -171,6 +174,13 @@ export class DiagramController {
     this.refreshUI();
   }
 
+  selectRelationship(relationshipId) {
+    this.selectedRelationshipId = relationshipId;
+    this.selectedTableIds.clear();
+    this.selectedGroupId = null;
+    this.refreshUI();
+  }
+
   handleSelectionArea(ids, isCumulative) {
     if (!isCumulative) {
       this.selectedTableIds.clear();
@@ -179,6 +189,7 @@ export class DiagramController {
       this.selectedTableIds.add(id);
     });
     this.selectedGroupId = null;
+    this.selectedRelationshipId = null;
     this.refreshUI();
   }
 
@@ -540,6 +551,9 @@ export class DiagramController {
     const confirmed = await this.uiManager.confirm("¿Estás seguro de que deseas eliminar esta relación?", "Eliminar Relación");
     if (confirmed) {
       this.history.push(this.stateManager.getState());
+      if (this.selectedRelationshipId === relationshipId) {
+        this.selectedRelationshipId = null;
+      }
       this.stateManager.removeRelationship(relationshipId);
       this.uiManager.showToast("Relación eliminada.", "success");
     }
