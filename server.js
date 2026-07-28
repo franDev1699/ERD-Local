@@ -2787,26 +2787,32 @@ server.on('upgrade', (req, socket) => {
   let role = ProjectRepository.getProjectRole(projectId, userId);
 
   if (!role) {
-    const exists = ProjectRepository.isProjectRegistered(projectId);
-    if (!exists) {
-      console.log(`[WebSocket] Migrando/Creando proyecto ${projectId} en BD. Owner: ${session.username}`);
-      const pendingName = urlObj.searchParams.get('name');
-      let displayName = pendingName || projectId;
-      const diskState = loadProjectState(projectId);
-      if (diskState && diskState.name) {
-        displayName = diskState.name;
-      }
-      ProjectRepository.createProject({
-        id: projectId,
-        display_name: displayName,
-        owner_id: userId
-      });
+    // Admins can access any project
+    if (session.is_admin) {
+      console.log(`[WebSocket] Admin "${session.username}" accediendo al proyecto ${projectId} sin membresía explícita → rol owner.`);
       role = 'owner';
     } else {
-      console.log(`[WebSocket] Acceso denegado a ${session.username} para el proyecto ${projectId} (No es miembro).`);
-      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
-      socket.destroy();
-      return;
+      const exists = ProjectRepository.isProjectRegistered(projectId);
+      if (!exists) {
+        console.log(`[WebSocket] Migrando/Creando proyecto ${projectId} en BD. Owner: ${session.username}`);
+        const pendingName = urlObj.searchParams.get('name');
+        let displayName = pendingName || projectId;
+        const diskState = loadProjectState(projectId);
+        if (diskState && diskState.name) {
+          displayName = diskState.name;
+        }
+        ProjectRepository.createProject({
+          id: projectId,
+          display_name: displayName,
+          owner_id: userId
+        });
+        role = 'owner';
+      } else {
+        console.log(`[WebSocket] Acceso denegado a ${session.username} para el proyecto ${projectId} (No es miembro).`);
+        socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
     }
   }
 
