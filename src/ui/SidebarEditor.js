@@ -326,8 +326,8 @@ export class SidebarEditor {
     const nameInput = nameGroup.querySelector("input");
     
     nameInput.addEventListener("change", (e) => {
-      // Clean table name: lowercase and alphanumeric only (no spaces/special chars)
-      const cleanName = e.target.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+      // Clean table name: alphanumeric only (no spaces/special chars)
+      const cleanName = e.target.value.trim().replace(/[^a-zA-Z0-9_]/g, "");
       e.target.value = cleanName;
       this.onTableUpdate(table.id, { name: cleanName });
     });
