@@ -44,8 +44,12 @@
 								<span id="user-project-role-badge" style="display: none; font-size: 0.65rem; font-weight: 600; padding: 1px 5px; border-radius: 4px; background-color: rgba(99, 102, 241, 0.2); color: var(--color-primary); flex-shrink: 0;"></span>
 							</div>
 							<div style="display: flex; align-items: center; gap: 4px;">
-								<button id="btn-admin-panel" class="btn-icon" title="Panel de Administración de Usuarios" style="border: none; background: transparent; padding: 4px; color: var(--color-text-muted); cursor: pointer; display: none;">
-									<i data-lucide="shield-check" style="width: 15px; height: 15px; color: var(--color-success-light);"></i>
+								<button id="btn-theme-toggle-sidebar" class="btn-icon btn-theme-toggle" title="Cambiar a Tema Claro / Oscuro" style="border: none; background: transparent; padding: 4px; color: var(--color-text-muted); cursor: pointer;">
+									<i data-lucide="sun" class="theme-icon-sun" style="width: 15px; height: 15px;"></i>
+									<i data-lucide="moon" class="theme-icon-moon" style="width: 15px; height: 15px; display: none;"></i>
+								</button>
+								<button id="btn-admin-panel" class="btn-icon" title="Gestionar Usuarios y Accesos" style="border: none; background: transparent; padding: 4px; color: var(--color-text-muted); cursor: pointer; display: none;">
+									<i data-lucide="users" style="width: 15px; height: 15px; color: #818cf8;"></i>
 								</button>
 								<button id="btn-logout" class="btn-icon" title="Cerrar Sesión" style="border: none; background: transparent; padding: 4px; color: var(--color-text-muted); cursor: pointer;">
 									<i data-lucide="log-out" style="width: 15px; height: 15px;"></i>
@@ -142,6 +146,10 @@
 								</button>
 								<button id="btn-ai-config-trigger" class="btn btn-tb" title="Configuración de IA y Prompts">
 									<i data-lucide="settings"></i> Configuración
+								</button>
+								<button id="btn-theme-toggle-canvas" class="btn btn-tb btn-theme-toggle" title="Cambiar a Tema Claro / Oscuro">
+									<i data-lucide="sun" class="theme-icon-sun"></i>
+									<i data-lucide="moon" class="theme-icon-moon" style="display: none;"></i>
 								</button>
 							</div>
 						</div>
@@ -374,25 +382,50 @@
 		<!-- Project Dashboard (Shown when no project in URL) -->
 		<div id="project-dashboard" class="dashboard-container hidden">
 			<div class="dashboard-header">
-				<h1 class="app-logo"><img src="assets/imgs/gnomo-logo.png" alt="gnome logo" style="width: 50px; height: 50px; object-fit: contain;"> Gnome <span>ERD</span></h1>
-				<div style="display: flex; gap: 10px; align-items: center;">
-					<!-- User profile in dashboard -->
-					<div id="dashboard-user-profile" style="display: flex; align-items: center; gap: 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--color-border); padding: 5px 12px; border-radius: 20px;">
-						<span id="dashboard-user-avatar" style="width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: white; background-color: var(--color-primary); flex-shrink: 0;"></span>
-						<span id="dashboard-user-name" style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-main);"></span>
+				<div class="dashboard-brand">
+					<img src="assets/imgs/gnomo-logo.png" alt="gnome logo" class="dashboard-logo-img">
+					<div class="dashboard-brand-text">
+						<h1>Gnome <span>ERD</span></h1>
+						<p>Espacio de trabajo y diagramas</p>
 					</div>
-					<button id="btn-dashboard-admin-panel" class="btn btn-secondary" title="Panel de Administración de Usuarios" style="display: none; align-items: center; gap: 4px;">
-						<i data-lucide="shield-check" style="width: 14px; height: 14px; color: var(--color-success-light);"></i> Admin
+				</div>
+				<div class="dashboard-actions">
+					<div id="dashboard-user-profile" class="dashboard-user-badge">
+						<span id="dashboard-user-avatar" class="dashboard-user-avatar"></span>
+						<span id="dashboard-user-name" class="dashboard-user-name"></span>
+					</div>
+					<button id="btn-dashboard-admin-panel" class="btn btn-secondary btn-dash-action" title="Gestionar Usuarios y Accesos" style="display: none;">
+						<i data-lucide="users" style="width: 14px; height: 14px; color: #818cf8;"></i>
+						<span>Gestión Usuarios</span>
 					</button>
-					<button id="btn-dashboard-ai-config" class="btn btn-secondary" title="Configuración de IA y Prompts"><i data-lucide="settings" style="width: 14px; height: 14px;"></i> Configuración IA</button>
-					<button id="btn-dashboard-new-project" class="btn btn-primary"><i data-lucide="plus" style="width: 14px; height: 14px;"></i> Nuevo Proyecto</button>
-					<button id="btn-dashboard-logout" class="btn btn-secondary" title="Cerrar Sesión" style="display: flex; align-items: center; gap: 4px; color: var(--color-danger);">
-						<i data-lucide="log-out" style="width: 14px; height: 14px;"></i> Salir
+					<button id="btn-dashboard-ai-config" class="btn btn-secondary btn-dash-action" title="Configuración de IA y Prompts">
+						<i data-lucide="sparkles" style="width: 14px; height: 14px; color: #a855f7;"></i>
+						<span>Configuración IA</span>
+					</button>
+					<button id="btn-dashboard-new-project" class="btn btn-primary btn-dash-primary">
+						<i data-lucide="plus" style="width: 15px; height: 15px;"></i>
+						<span>Nuevo Proyecto</span>
+					</button>
+					<button id="btn-theme-toggle-dashboard" class="btn btn-secondary btn-dash-action btn-theme-toggle" title="Cambiar a Tema Claro / Oscuro">
+						<i data-lucide="sun" class="theme-icon-sun" style="width: 14px; height: 14px;"></i>
+						<i data-lucide="moon" class="theme-icon-moon" style="width: 14px; height: 14px; display: none;"></i>
+					</button>
+					<button id="btn-dashboard-logout" class="btn btn-secondary btn-dash-action btn-dash-logout" title="Cerrar Sesión">
+						<i data-lucide="log-out" style="width: 14px; height: 14px;"></i>
 					</button>
 				</div>
 			</div>
 			<div class="dashboard-content">
-				<h2 class="dashboard-title">Mis Proyectos</h2>
+				<div class="dashboard-toolbar">
+					<div class="dashboard-title-area">
+						<h2 class="dashboard-title">Proyectos</h2>
+						<span id="dashboard-projects-count" class="dashboard-count-badge">0</span>
+					</div>
+					<div class="dashboard-search-box">
+						<i data-lucide="search" style="width: 14px; height: 14px; color: var(--color-text-muted);"></i>
+						<input type="text" id="dashboard-search-input" placeholder="Buscar proyectos..." autocomplete="off">
+					</div>
+				</div>
 				<div id="projects-grid" class="projects-grid">
 					<!-- Project cards will be loaded here -->
 				</div>
@@ -791,65 +824,103 @@
 
 		<!-- Admin Panel Modal -->
 		<div id="admin-modal" class="modal hidden">
-			<div class="modal-content" style="max-width: 700px;">
-				<div class="modal-header">
-					<h2>Panel de Administración de Usuarios</h2>
+			<div class="modal-content" style="max-width: 820px; width: 95%; max-height: 90vh; display: flex; flex-direction: column;">
+				<div class="modal-header" style="padding: 16px 24px; border-bottom: 1px solid var(--color-border); display: flex; justify-content: space-between; align-items: center;">
+					<div style="display: flex; align-items: center; gap: 10px;">
+						<div style="width: 34px; height: 34px; border-radius: 8px; background: rgba(99, 102, 241, 0.15); display: flex; align-items: center; justify-content: center; color: #818cf8;">
+							<i data-lucide="users" style="width: 18px; height: 18px;"></i>
+						</div>
+						<div>
+							<h2 style="font-size: 1.15rem; font-weight: 700; margin: 0; color: var(--color-text-main);">Gestión de Usuarios y Accesos</h2>
+							<p style="margin: 0; font-size: 0.78rem; color: var(--color-text-muted);">Administra cuentas, roles y políticas de registro de la plataforma</p>
+						</div>
+					</div>
 					<button id="btn-close-admin-modal" class="btn-icon"><i data-lucide="x"></i></button>
 				</div>
-				<div class="modal-body" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 20px;">
-					<!-- System configuration section -->
-					<div style="background-color: rgba(255, 255, 255, 0.02); border: 1px solid var(--color-border); padding: 15px; border-radius: 8px;">
-						<h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 12px; color: var(--color-text-main);">Configuración del Sistema</h3>
-						<div style="display: flex; justify-content: space-between; align-items: center;">
+				<div class="modal-body" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto;">
+					<!-- Quick Stats & System Settings Card -->
+					<div style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); padding: 16px 20px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap;">
+						<div style="display: flex; gap: 20px; align-items: center;">
+							<div style="border-right: 1px solid var(--color-border); padding-right: 20px;">
+								<span style="font-size: 0.72rem; text-transform: uppercase; color: var(--color-text-muted); font-weight: 600; display: block;">Total Cuentas</span>
+								<span id="admin-total-users-count" style="font-size: 1.3rem; font-weight: 700; color: var(--color-text-main);">0</span>
+							</div>
 							<div>
-								<span style="font-size: 0.88rem; font-weight: 500; color: var(--color-text-main); display: block;">Permitir Registro Público</span>
-								<span style="font-size: 0.78rem; color: var(--color-text-muted);">Permite que cualquier persona cree una cuenta de colaborador desde la pantalla de inicio de sesión.</span>
+								<span style="font-size: 0.88rem; font-weight: 600; color: var(--color-text-main); display: block;">Permitir Registro Público</span>
+								<span style="font-size: 0.75rem; color: var(--color-text-muted);">Los visitantes pueden crear cuenta desde la pantalla de login sin invitación previa.</span>
 							</div>
-							<div class="form-check form-switch" style="padding-left: 2.5em; display: flex; align-items: center;">
-								<input class="form-check-input" type="checkbox" id="admin-settings-allow-register" style="cursor: pointer; width: 40px; height: 20px;" />
-							</div>
+						</div>
+						<div class="form-check form-switch" style="display: flex; align-items: center;">
+							<input class="form-check-input" type="checkbox" id="admin-settings-allow-register" style="cursor: pointer; width: 44px; height: 22px;" />
 						</div>
 					</div>
 
 					<!-- Add new user section -->
-					<div style="background-color: rgba(255, 255, 255, 0.02); border: 1px solid var(--color-border); padding: 15px; border-radius: 8px;">
-						<h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 12px; color: var(--color-text-main);">Crear Nuevo Usuario</h3>
-						<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px;">
-							<input type="text" id="admin-user-username" class="form-control" placeholder="Usuario (ej: ana)" style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 6px 12px; border-radius: 4px; font-size: 0.85rem;" />
-							<input type="text" id="admin-user-displayname" class="form-control" placeholder="Nombre Visible (ej: Ana G.)" style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 6px 12px; border-radius: 4px; font-size: 0.85rem;" />
-							<input type="password" id="admin-user-password" class="form-control" placeholder="Contraseña" style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 6px 12px; border-radius: 4px; font-size: 0.85rem;" />
+					<div style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); padding: 18px 20px; border-radius: 10px;">
+						<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+							<h3 style="font-size: 0.95rem; font-weight: 700; margin: 0; color: var(--color-text-main); display: flex; align-items: center; gap: 6px;">
+								<i data-lucide="user-plus" style="width: 15px; height: 15px; color: var(--color-primary);"></i>
+								Crear Nueva Cuenta
+							</h3>
 						</div>
-						<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
-							<div style="display: flex; align-items: center; gap: 8px;">
-								<span style="font-size: 0.85rem; color: var(--color-text-muted);">Color:</span>
+						<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+							<div>
+								<label style="display: block; font-size: 0.75rem; color: var(--color-text-muted); margin-bottom: 4px;">Usuario (ID de acceso):</label>
+								<input type="text" id="admin-user-username" class="form-control" placeholder="ej: carlos.dev" style="background-color: var(--color-bg-sidebar); border: 1px solid var(--color-border); color: white; padding: 7px 12px; border-radius: 6px; font-size: 0.82rem; width: 100%;" />
+							</div>
+							<div>
+								<label style="display: block; font-size: 0.75rem; color: var(--color-text-muted); margin-bottom: 4px;">Nombre Visible:</label>
+								<input type="text" id="admin-user-displayname" class="form-control" placeholder="ej: Carlos Mendoza" style="background-color: var(--color-bg-sidebar); border: 1px solid var(--color-border); color: white; padding: 7px 12px; border-radius: 6px; font-size: 0.82rem; width: 100%;" />
+							</div>
+							<div>
+								<label style="display: block; font-size: 0.75rem; color: var(--color-text-muted); margin-bottom: 4px;">Contraseña Inicial:</label>
+								<input type="password" id="admin-user-password" class="form-control" placeholder="Mínimo 8 caracteres" style="background-color: var(--color-bg-sidebar); border: 1px solid var(--color-border); color: white; padding: 7px 12px; border-radius: 6px; font-size: 0.82rem; width: 100%;" />
+							</div>
+						</div>
+						<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+							<div style="display: flex; align-items: center; gap: 10px;">
+								<span style="font-size: 0.78rem; color: var(--color-text-muted);">Color de Avatar:</span>
 								<div class="color-options" id="admin-user-color-options" style="display: flex; gap: 6px;">
-									<div class="color-dot selected" style="background-color: #6366f1; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" data-color="#6366f1"></div>
-									<div class="color-dot" style="background-color: #10b981; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" data-color="#10b981"></div>
-									<div class="color-dot" style="background-color: #3b82f6; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" data-color="#3b82f6"></div>
-									<div class="color-dot" style="background-color: #ef4444; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" data-color="#ef4444"></div>
-									<div class="color-dot" style="background-color: #f59e0b; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" data-color="#f59e0b"></div>
+									<div class="color-dot selected" style="background-color: #6366f1; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" data-color="#6366f1"></div>
+									<div class="color-dot" style="background-color: #10b981; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" data-color="#10b981"></div>
+									<div class="color-dot" style="background-color: #3b82f6; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" data-color="#3b82f6"></div>
+									<div class="color-dot" style="background-color: #f59e0b; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" data-color="#f59e0b"></div>
+									<div class="color-dot" style="background-color: #ec4899; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" data-color="#ec4899"></div>
+									<div class="color-dot" style="background-color: #8b5cf6; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" data-color="#8b5cf6"></div>
 								</div>
 							</div>
-							<div style="display: flex; align-items: center; gap: 12px;">
-								<label style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--color-text-muted); cursor: pointer;">
-									<input type="checkbox" id="admin-user-isadmin" style="cursor: pointer;" /> ¿Es Administrador?
+							<div style="display: flex; align-items: center; gap: 14px;">
+								<label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--color-text-main); cursor: pointer; user-select: none;">
+									<input type="checkbox" id="admin-user-isadmin" style="cursor: pointer; width: 15px; height: 15px;" />
+									<span>Rol Administrador</span>
 								</label>
-								<button id="btn-admin-add-user" class="btn btn-primary" style="padding: 6px 16px; border-radius: 4px; font-weight: 600; font-size: 0.85rem;">Crear</button>
+								<button id="btn-admin-add-user" class="btn btn-primary" style="padding: 7px 18px; border-radius: 6px; font-weight: 600; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 6px;">
+									<i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+									<span>Registrar Usuario</span>
+								</button>
 							</div>
 						</div>
 					</div>
 
-					<!-- Users list -->
+					<!-- Users list with search bar -->
 					<div>
-						<h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: var(--color-text-main);">Usuarios Registrados</h3>
-						<div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--color-border); border-radius: 6px;">
-							<table class="table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 0; background-color: transparent;">
-								<thead style="background-color: rgba(255, 255, 255, 0.02); position: sticky; top: 0; z-index: 1;">
+						<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 12px; flex-wrap: wrap;">
+							<h3 style="font-size: 0.95rem; font-weight: 700; margin: 0; color: var(--color-text-main);">
+								Usuarios Registrados
+							</h3>
+							<div style="position: relative; width: 240px;">
+								<input type="text" id="admin-users-search" placeholder="Filtrar por nombre o usuario..." style="background-color: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 6px 12px 6px 30px; border-radius: 6px; font-size: 0.8rem; width: 100%;" />
+								<i data-lucide="search" style="width: 13px; height: 13px; color: var(--color-text-muted); position: absolute; left: 10px; top: 50%; transform: translateY(-50%);"></i>
+							</div>
+						</div>
+						<div style="max-height: 280px; overflow-y: auto; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg-app);">
+							<table class="table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.82rem; color: var(--color-text-muted); margin-bottom: 0;">
+								<thead style="background-color: var(--color-bg-sidebar); position: sticky; top: 0; z-index: 2;">
 									<tr style="border-bottom: 1px solid var(--color-border);">
-										<th style="padding: 10px; color: var(--color-text-main);">Usuario</th>
-										<th style="padding: 10px; color: var(--color-text-main);">Nombre Visible</th>
-										<th style="padding: 10px; color: var(--color-text-main);">Rol</th>
-										<th style="padding: 10px; text-align: right; color: var(--color-text-main);">Acciones</th>
+										<th style="padding: 10px 14px; color: var(--color-text-main); font-weight: 600;">Usuario</th>
+										<th style="padding: 10px 14px; color: var(--color-text-main); font-weight: 600;">Nombre Completo</th>
+										<th style="padding: 10px 14px; color: var(--color-text-main); font-weight: 600;">Rol Asignado</th>
+										<th style="padding: 10px 14px; text-align: right; color: var(--color-text-main); font-weight: 600;">Acciones</th>
 									</tr>
 								</thead>
 								<tbody id="admin-users-list-table">

@@ -29,8 +29,61 @@ const config = {
   }
 };
 
+// Theme Management Helper
+export class ThemeManager {
+  static STORAGE_KEY = 'gnome_erd_theme';
+
+  static init() {
+    const savedTheme = localStorage.getItem(this.STORAGE_KEY) || 'dark';
+    this.applyTheme(savedTheme);
+    this.setupListeners();
+  }
+
+  static applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem(this.STORAGE_KEY, theme);
+    this.updateIcons(theme);
+  }
+
+  static toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'dark';
+    const next = current === 'light' ? 'dark' : 'light';
+    this.applyTheme(next);
+  }
+
+  static updateIcons(theme) {
+    const isLight = theme === 'light';
+    document.querySelectorAll('.theme-icon-sun').forEach(el => {
+      el.style.display = isLight ? 'none' : 'inline-block';
+    });
+    document.querySelectorAll('.theme-icon-moon').forEach(el => {
+      el.style.display = isLight ? 'inline-block' : 'none';
+    });
+    document.querySelectorAll('.btn-theme-toggle').forEach(btn => {
+      btn.title = isLight ? 'Cambiar a Tema Oscuro' : 'Cambiar a Tema Claro';
+    });
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+  }
+
+  static setupListeners() {
+    document.querySelectorAll('.btn-theme-toggle').forEach(btn => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        this.toggleTheme();
+      };
+    });
+  }
+}
+
+// Apply theme immediately before DOM complete to avoid dark flash
+window.ThemeManager = ThemeManager;
+ThemeManager.init();
+
 const app = new AppController(config);
 
 document.addEventListener("DOMContentLoaded", () => {
+  ThemeManager.setupListeners();
   app.init();
 });

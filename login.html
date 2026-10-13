@@ -31,6 +31,32 @@
       --font-display: 'Outfit', sans-serif;
     }
 
+    [data-theme="light"] {
+      --color-bg: #f1f5f9;
+      --color-card: #ffffff;
+      --color-border: #cbd5e1;
+      --color-border-focus: #4f46e5;
+      --color-primary: #4f46e5;
+      --color-primary-hover: #4338ca;
+      --color-text-main: #0f172a;
+      --color-text-muted: #64748b;
+      --color-danger: #dc2626;
+      --color-danger-bg: rgba(220, 38, 38, 0.08);
+    }
+
+    [data-theme="light"] .form-control {
+      background-color: #f8fafc;
+      color: #0f172a;
+    }
+
+    [data-theme="light"] .card {
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+    }
+
+    [data-theme="light"] .glow-bg {
+      background: radial-gradient(circle, rgba(79, 70, 229, 0.08) 0%, rgba(79, 70, 229, 0) 70%);
+    }
+
     * {
       box-sizing: border-box;
       margin: 0;
@@ -287,6 +313,10 @@
 </head>
 <body>
   <div class="glow-bg"></div>
+  <button id="btn-login-theme-toggle" class="btn-theme-toggle" title="Cambiar a Tema Claro / Oscuro" style="position: fixed; top: 18px; right: 18px; background: var(--color-card); border: 1px solid var(--color-border); color: var(--color-text-muted); border-radius: 8px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s ease;">
+    <i data-lucide="sun" id="login-theme-icon-sun" style="width: 16px; height: 16px;"></i>
+    <i data-lucide="moon" id="login-theme-icon-moon" style="width: 16px; height: 16px; display: none;"></i>
+  </button>
   <div class="container">
     <div class="card">
       <div class="logo-container">
@@ -381,12 +411,36 @@
       </form>
 
       <div class="toggle-text" id="toggle-container">
-        ¿No tienes cuenta? <a class="toggle-link" id="link-to-register">Regístrate aquí</a>
+        ¿No tienes cuenta? <a class="toggle-link" id="link-to-register" href="#register">Regístrate aquí</a>
       </div>
     </div>
   </div>
 
   <script>
+    // Theme Management
+    const THEME_KEY = 'gnome_erd_theme';
+    function applyLoginTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      localStorage.setItem(THEME_KEY, theme);
+      const isLight = theme === 'light';
+      const sun = document.getElementById('login-theme-icon-sun');
+      const moon = document.getElementById('login-theme-icon-moon');
+      if (sun) sun.style.display = isLight ? 'none' : 'inline-block';
+      if (moon) moon.style.display = isLight ? 'inline-block' : 'none';
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    const currentSavedTheme = localStorage.getItem(THEME_KEY) || 'dark';
+    applyLoginTheme(currentSavedTheme);
+
+    const themeToggleBtn = document.getElementById('btn-login-theme-toggle');
+    if (themeToggleBtn) {
+      themeToggleBtn.addEventListener('click', () => {
+        const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+        applyLoginTheme(cur === 'light' ? 'dark' : 'light');
+      });
+    }
+
     // Initialize Lucide Icons
     lucide.createIcons();
 
@@ -444,6 +498,9 @@
           if (toggleContainer) {
             toggleContainer.innerHTML = '<span style="color: var(--color-text-muted);">El registro público está cerrado.</span>';
           }
+          if (isRegisterMode) {
+            showLogin();
+          }
         }
       } catch (e) {
         console.error('Error al consultar estado de registro:', e);
@@ -479,35 +536,71 @@
     }
 
     // Toggle Modes
-    function showRegister() {
+    function showRegister(updateHash = true) {
       if (!publicRegistrationOpen) {
         showError('El registro público está deshabilitado.');
         return;
       }
       isRegisterMode = true;
+      if (updateHash && window.location.hash !== '#register') {
+        history.pushState(null, '', '#register');
+      }
       loginForm.classList.add('hidden');
       registerForm.classList.remove('hidden');
       subtitleText.textContent = 'Crea tu cuenta de colaborador';
-      toggleContainer.innerHTML = '¿Ya tienes cuenta? <a class="toggle-link" id="link-to-login">Inicia sesión</a>';
-      document.getElementById('link-to-login').addEventListener('click', showLogin);
+      toggleContainer.innerHTML = '¿Ya tienes cuenta? <a class="toggle-link" id="link-to-login" href="#login">Inicia sesión</a>';
+      const linkToLogin = document.getElementById('link-to-login');
+      linkToLogin.addEventListener('click', (e) => {
+        if (!e.ctrlKey && !e.metaKey && e.button === 0) {
+          e.preventDefault();
+          showLogin();
+        }
+      });
       errorAlert.style.display = 'none';
     }
 
-    function showLogin() {
+    function showLogin(updateHash = true) {
       isRegisterMode = false;
+      if (updateHash && window.location.hash) {
+        history.pushState(null, '', window.location.pathname + window.location.search);
+      }
       registerForm.classList.add('hidden');
       loginForm.classList.remove('hidden');
       subtitleText.textContent = 'Diseño de diagramas colaborativo';
       if (publicRegistrationOpen) {
-        toggleContainer.innerHTML = '¿No tienes cuenta? <a class="toggle-link" id="link-to-register">Regístrate aquí</a>';
-        document.getElementById('link-to-register').addEventListener('click', showRegister);
+        toggleContainer.innerHTML = '¿No tienes cuenta? <a class="toggle-link" id="link-to-register" href="#register">Regístrate aquí</a>';
+        const newLink = document.getElementById('link-to-register');
+        newLink.addEventListener('click', (e) => {
+          if (!e.ctrlKey && !e.metaKey && e.button === 0) {
+            e.preventDefault();
+            showRegister();
+          }
+        });
       } else {
         toggleContainer.innerHTML = '<span style="color: var(--color-text-muted);">El registro público está cerrado.</span>';
       }
       errorAlert.style.display = 'none';
     }
 
-    linkToRegister.addEventListener('click', showRegister);
+    linkToRegister.addEventListener('click', (e) => {
+      if (!e.ctrlKey && !e.metaKey && e.button === 0) {
+        e.preventDefault();
+        showRegister();
+      }
+    });
+
+    function syncViewWithHash() {
+      if (window.location.hash === '#register') {
+        showRegister(false);
+      } else {
+        showLogin(false);
+      }
+    }
+
+    window.addEventListener('hashchange', syncViewWithHash);
+    if (window.location.hash === '#register') {
+      syncViewWithHash();
+    }
 
     function showError(msg) {
       errorMessage.textContent = msg;

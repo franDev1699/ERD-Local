@@ -175,29 +175,76 @@ export class CollabController {
       document.getElementById("btn-dashboard-new-project").addEventListener("click", () => this.createNewProject());
     }
 
+    const searchInput = document.getElementById("dashboard-search-input");
+    if (searchInput) {
+      searchInput.oninput = () => {
+        this.filterProjects(searchInput.value);
+      };
+    }
+
     await this.setupUserIdentity();
     this.loadProjectsList();
+
+    // Ensure theme listeners are attached when dashboard opens
+    if (window.ThemeManager) {
+      window.ThemeManager.setupListeners();
+    }
+
     if (window.lucide) {
       window.lucide.createIcons();
     }
   }
 
+  filterProjects(query) {
+    const q = (query || "").toLowerCase().trim();
+    const cards = document.querySelectorAll(".project-card");
+    let visibleCount = 0;
+    cards.forEach(card => {
+      const title = card.getAttribute("data-project-name") || "";
+      const author = card.getAttribute("data-project-author") || "";
+      if (!q || title.includes(q) || author.includes(q)) {
+        card.style.display = "";
+        visibleCount++;
+      } else {
+        card.style.display = "none";
+      }
+    });
+    const countBadge = document.getElementById("dashboard-projects-count");
+    if (countBadge) {
+      countBadge.textContent = visibleCount;
+    }
+  }
+
+  formatDisplayName(rawName, id) {
+    if (rawName && !rawName.startsWith("p_17") && !rawName.startsWith("p_")) {
+      return rawName;
+    }
+    if (id === "default") return "Proyecto Principal";
+    if (id === "test") return "Proyecto de Prueba";
+    if (rawName && rawName !== id) return rawName;
+    return `Diagrama #${(id || "").slice(-5).toUpperCase()}`;
+  }
+
   async loadProjectsList() {
     const grid = document.getElementById("projects-grid");
     if (!grid) return;
-    grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--color-text-muted); padding: 40px;">Cargando proyectos...</div>`;
+    grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--color-text-muted); padding: 50px;">Cargando proyectos...</div>`;
 
     try {
       const response = await fetch("/api/projects");
       const projects = await response.json();
+      this.cachedProjects = projects;
+
+      const countBadge = document.getElementById("dashboard-projects-count");
+      if (countBadge) countBadge.textContent = projects.length;
 
       if (projects.length === 0) {
         grid.innerHTML = `
-          <div style="grid-column: 1/-1; text-align: center; color: var(--color-text-muted); padding: 60px; border: 1.5px dashed var(--color-border); border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 15px;">
-            <i data-lucide="folder-open" style="width: 48px; height: 48px; color: var(--color-text-muted);"></i>
+          <div style="grid-column: 1/-1; text-align: center; color: var(--color-text-muted); padding: 60px; border: 1px dashed var(--color-border); border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+            <i data-lucide="folder-open" style="width: 40px; height: 40px; color: var(--color-text-muted); opacity: 0.6;"></i>
             <div>
-              <h3 style="color: var(--color-text-main); margin-bottom: 5px;">No hay proyectos creados</h3>
-              <p style="font-size: 0.9rem;">Crea tu primer proyecto colaborativo usando el botón de arriba.</p>
+              <h3 style="color: var(--color-text-main); font-size: 1.1rem; margin-bottom: 4px;">No tienes proyectos aún</h3>
+              <p style="font-size: 0.85rem; color: var(--color-text-muted);">Crea tu primer diagrama colaborativo haciendo clic en "Nuevo Proyecto".</p>
             </div>
           </div>
         `;
@@ -207,58 +254,116 @@ export class CollabController {
 
       grid.innerHTML = "";
       projects.forEach(project => {
+        let roleBadgeClass = 'project-badge-public';
         let roleText = 'Público';
-        let roleClass = 'badge bg-secondary';
+
         if (project.role === 'owner') {
+          roleBadgeClass = 'project-badge-owner';
           roleText = 'Creador';
-          roleClass = 'badge bg-primary';
         } else if (project.role === 'editor') {
+          roleBadgeClass = 'project-badge-editor';
           roleText = 'Editor';
-          roleClass = 'badge bg-success';
         } else if (project.role === 'viewer') {
+          roleBadgeClass = 'project-badge-viewer';
           roleText = 'Lector';
-          roleClass = 'badge bg-info text-dark';
         }
+
+        const isOwnerOrAdmin = project.role === 'owner' || project.role === 'public' || (this.myUser && this.myUser.is_admin);
+        const displayName = this.formatDisplayName(project.name, project.id);
+        const ownerName = project.owner_name || 'Sistema';
+        const ownerInitial = ownerName.charAt(0).toUpperCase();
 
         const card = document.createElement("div");
         card.className = "project-card";
+        card.setAttribute("data-project-name", displayName.toLowerCase());
+        card.setAttribute("data-project-author", ownerName.toLowerCase());
+
         card.innerHTML = `
-          <div class="project-card-info">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <span class="${roleClass}" style="font-size: 0.7rem; font-weight: 600; padding: 3px 6px; border-radius: 4px;">${roleText}</span>
-              <span style="font-size: 0.7rem; color: var(--color-text-muted);">Por: ${project.owner_name || 'Sistema'}</span>
+          <div>
+            <div class="project-card-header">
+              <div class="project-card-badges">
+                <span class="project-badge ${roleBadgeClass}">${roleText}</span>
+              </div>
+              <div class="project-card-author">
+                <span class="project-card-author-avatar" style="background-color: var(--color-primary);">${ownerInitial}</span>
+                <span>${ownerName}</span>
+              </div>
             </div>
-            <h3 style="margin-top: 4px; font-size: 1.1rem; font-weight: 700; color: var(--color-text-main);">${project.name}</h3>
-            <div class="project-card-stats" style="margin-top: 8px; display: flex; gap: 12px; font-size: 0.8rem; color: var(--color-text-muted);">
-              <span><i data-lucide="database" style="width: 12px; height: 12px; vertical-align: middle; margin-right: 2px;"></i> ${project.tableCount} tablas</span>
-              <span><i data-lucide="git-merge" style="width: 12px; height: 12px; vertical-align: middle; margin-right: 2px;"></i> ${project.relationshipCount} rel.</span>
+            <div class="project-card-title-row">
+              <h3 class="project-card-title" title="${displayName}">${displayName}</h3>
+            </div>
+            <div class="project-card-stats">
+              <span><i data-lucide="table-2" style="width: 13px; height: 13px;"></i> ${project.tableCount} tablas</span>
+              <span><i data-lucide="network" style="width: 13px; height: 13px;"></i> ${project.relationshipCount} relaciones</span>
             </div>
           </div>
-          <div class="project-card-footer" style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.03); padding-top: 10px;">
-            <span class="project-card-date" style="font-size: 0.75rem; color: var(--color-text-muted);">Modificado: ${new Date(project.lastModified).toLocaleDateString()}</span>
-            ${(project.role === 'owner' || project.role === 'public') ? `
-            <button class="project-card-delete" title="Eliminar proyecto" style="background: transparent; border: none; color: var(--color-danger); cursor: pointer; padding: 4px;">
-              <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
-            </button>` : ''}
+
+          <div class="project-card-footer">
+            <span class="project-card-date" title="Última modificación">
+              <i data-lucide="clock" style="width: 12px; height: 12px;"></i>
+              ${new Date(project.lastModified).toLocaleDateString()}
+            </span>
+            <div class="project-card-actions">
+              ${isOwnerOrAdmin ? `
+                <button class="project-action-btn project-action-rename" title="Renombrar proyecto">
+                  <i data-lucide="edit-3" style="width: 13px; height: 13px;"></i>
+                </button>
+                <button class="project-action-btn project-action-delete" title="Eliminar proyecto">
+                  <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
+                </button>
+              ` : ''}
+            </div>
           </div>
         `;
 
         card.addEventListener("click", (e) => {
-          if (e.target.closest(".project-card-delete")) return;
+          if (e.target.closest(".project-action-btn")) return;
           window.open(`?project=${encodeURIComponent(project.id)}`, '_blank');
         });
 
-        const btnDelete = card.querySelector(".project-card-delete");
+        // Rename Action
+        const btnRename = card.querySelector(".project-action-rename");
+        if (btnRename) {
+          btnRename.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            const currentName = project.name || displayName;
+            const newName = await this.uiManager.prompt("Nuevo nombre del proyecto:", currentName, "Renombrar Proyecto");
+            if (newName && newName.trim() && newName.trim() !== currentName) {
+              try {
+                const res = await fetch("/api/rename-project", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ projectId: project.id, newName: newName.trim() })
+                });
+                const result = await res.json();
+                if (result.success) {
+                  this.uiManager.showToast("Proyecto renombrado con éxito.", "success");
+                  this.loadProjectsList();
+                } else {
+                  this.uiManager.showToast(result.error || "No se pudo renombrar el proyecto.", "error");
+                }
+              } catch (err) {
+                this.uiManager.showToast("Error de conexión.", "error");
+              }
+            }
+          });
+        }
+
+        // Delete Action
+        const btnDelete = card.querySelector(".project-action-delete");
         if (btnDelete) {
           btnDelete.addEventListener("click", async (e) => {
             e.stopPropagation();
-            const confirmed = await this.uiManager.confirm(`¿Estás seguro de que deseas eliminar el proyecto "${project.name}"? Esta acción borrará permanentemente todos sus archivos.`, "Eliminar Proyecto");
+            const confirmed = await this.uiManager.confirm(
+              `¿Estás seguro de que deseas eliminar permanentemente el proyecto "${displayName}"? Esta acción no se puede deshacer.`, 
+              "Eliminar Proyecto"
+            );
             if (confirmed) {
               try {
                 const res = await fetch(`/api/delete-project?project=${encodeURIComponent(project.id)}`, { method: "POST" });
                 const result = await res.json();
                 if (result.success) {
-                  this.uiManager.showToast(`Proyecto "${project.name}" eliminado.`, "success");
+                  this.uiManager.showToast(`Proyecto "${displayName}" eliminado.`, "success");
                   this.loadProjectsList();
                 } else {
                   this.uiManager.showToast(result.error || "Error al eliminar el proyecto.", "error");
@@ -639,158 +744,204 @@ export class CollabController {
       };
     });
 
+    const searchUsersInput = document.getElementById('admin-users-search');
+    let cachedUsers = [];
+
+    const renderUsersTable = (userList) => {
+      usersTable.innerHTML = '';
+      if (userList.length === 0) {
+        usersTable.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--color-text-muted); padding: 24px;">No se encontraron usuarios coincidentes.</td></tr>';
+        return;
+      }
+      userList.forEach(user => {
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid rgba(255,255,255,0.04)';
+        const isAdmin = user.is_admin === 1;
+        tr.innerHTML = `
+          <td style="padding: 10px 14px; font-weight: 600; color: var(--color-text-main); vertical-align: middle;">
+            ${user.username}
+          </td>
+          <td style="padding: 10px 14px; vertical-align: middle;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="width: 22px; height: 22px; border-radius: 50%; background-color: ${user.color || '#6366f1'}; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: white;">
+                ${(user.display_name || user.username || '?').charAt(0).toUpperCase()}
+              </span>
+              <span style="color: var(--color-text-main); font-weight: 500;">${user.display_name}</span>
+            </div>
+          </td>
+          <td style="padding: 10px 14px; vertical-align: middle;">
+            <select class="admin-role-select form-select" data-userid="${user.id}" style="width: 140px; font-size: 0.8rem; background-color: var(--color-bg-card); border: 1px solid var(--color-border); color: var(--color-text-main); padding: 4px 8px; border-radius: 6px;">
+              <option value="user" ${!isAdmin ? 'selected' : ''}>Colaborador</option>
+              <option value="admin" ${isAdmin ? 'selected' : ''}>Administrador</option>
+            </select>
+          </td>
+          <td style="padding: 10px 14px; text-align: right; vertical-align: middle;">
+            <div style="display: inline-flex; gap: 6px;">
+              <button class="btn-admin-change-password project-action-btn" data-userid="${user.id}" data-username="${user.username}" title="Cambiar Contraseña" style="color: var(--color-warning);">
+                <i data-lucide="key" style="width: 14px; height: 14px;"></i>
+              </button>
+              <button class="btn-admin-delete-user project-action-btn project-action-delete" data-userid="${user.id}" title="Eliminar Usuario">
+                <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+              </button>
+            </div>
+          </td>
+        `;
+        usersTable.appendChild(tr);
+      });
+
+      if (window.lucide) window.lucide.createIcons();
+      attachUserRowEvents(userList);
+    };
+
+    if (searchUsersInput) {
+      searchUsersInput.oninput = () => {
+        const q = searchUsersInput.value.toLowerCase().trim();
+        const filtered = cachedUsers.filter(u => 
+          (u.username || '').toLowerCase().includes(q) || 
+          (u.display_name || '').toLowerCase().includes(q)
+        );
+        renderUsersTable(filtered);
+      };
+    }
+
     const loadUsers = async () => {
-      usersTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 10px;">Cargando...</td></tr>';
+      usersTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: var(--color-text-muted);">Cargando usuarios...</td></tr>';
       try {
         const res = await fetch('/api/admin/users');
         if (!res.ok) throw new Error();
-        const users = await res.json();
-        usersTable.innerHTML = '';
-        users.forEach(user => {
-          const tr = document.createElement('tr');
-          tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
-          tr.innerHTML = `
-            <td style="padding: 10px; font-weight: 600; color: var(--color-text-main); vertical-align: middle;">${user.username}</td>
-            <td style="padding: 10px; vertical-align: middle;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="width: 14px; height: 14px; border-radius: 50%; background-color: ${user.color || '#6366f1'}; display: inline-block;"></span>
-                <span style="color: var(--color-text-main);">${user.display_name}</span>
-              </div>
-            </td>
-            <td style="padding: 10px; vertical-align: middle;">
-              <select class="admin-role-select form-select" data-userid="${user.id}" style="width: 130px; font-size: 0.8rem; background: var(--color-bg-app); border: 1px solid var(--color-border); color: white; padding: 2px 6px; border-radius: 4px;">
-                <option value="user" ${user.is_admin === 0 ? 'selected' : ''}>Usuario</option>
-                <option value="admin" ${user.is_admin === 1 ? 'selected' : ''}>Administrador</option>
-              </select>
-            </td>
-            <td style="padding: 10px; text-align: right; vertical-align: middle;">
-              <div style="display: inline-flex; gap: 8px;">
-                <button class="btn-admin-change-password btn-icon" data-userid="${user.id}" data-username="${user.username}" title="Cambiar Contraseña" style="border: none; background: transparent; color: var(--color-warning); cursor: pointer; padding: 2px;"><i data-lucide="key" style="width: 14px; height: 14px;"></i></button>
-                <button class="btn-admin-delete-user btn-icon" data-userid="${user.id}" title="Eliminar Usuario" style="border: none; background: transparent; color: var(--color-danger); cursor: pointer; padding: 2px;"><i data-lucide="trash-2" style="width: 14px; height: 14px;"></i></button>
-              </div>
-            </td>
-          `;
-          usersTable.appendChild(tr);
-        });
+        cachedUsers = await res.json();
+        
+        const countEl = document.getElementById('admin-total-users-count');
+        if (countEl) countEl.textContent = cachedUsers.length;
 
-        if (window.lucide) window.lucide.createIcons();
+        if (searchUsersInput && searchUsersInput.value.trim()) {
+          const q = searchUsersInput.value.toLowerCase().trim();
+          renderUsersTable(cachedUsers.filter(u => 
+            (u.username || '').toLowerCase().includes(q) || 
+            (u.display_name || '').toLowerCase().includes(q)
+          ));
+        } else {
+          renderUsersTable(cachedUsers);
+        }
+      } catch (e) {
+        usersTable.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--color-danger); padding: 15px;">Error al cargar lista de usuarios</td></tr>';
+      }
+    };
 
-        // Setup change password buttons logic
-        usersTable.querySelectorAll('.btn-admin-change-password').forEach(btn => {
-          btn.onclick = () => {
-            const userId = btn.getAttribute('data-userid');
-            const username = btn.getAttribute('data-username');
-            const userObj = users.find(u => u.id === userId);
-            if (!userObj) return;
+    const attachUserRowEvents = (users) => {
+      // Setup change password buttons logic
+      usersTable.querySelectorAll('.btn-admin-change-password').forEach(btn => {
+        btn.onclick = () => {
+          const userId = btn.getAttribute('data-userid');
+          const username = btn.getAttribute('data-username');
+          const userObj = users.find(u => u.id === userId);
+          if (!userObj) return;
 
-            const cpModal = document.getElementById('admin-change-password-modal');
-            const cpTarget = document.getElementById('change-password-target-user');
-            const cpInput = document.getElementById('change-password-input');
-            const cpClose = document.getElementById('btn-close-change-password-modal');
-            const cpCancel = document.getElementById('btn-cancel-change-password');
-            const cpSave = document.getElementById('btn-save-change-password');
+          const cpModal = document.getElementById('admin-change-password-modal');
+          const cpTarget = document.getElementById('change-password-target-user');
+          const cpInput = document.getElementById('change-password-input');
+          const cpClose = document.getElementById('btn-close-change-password-modal');
+          const cpCancel = document.getElementById('btn-cancel-change-password');
+          const cpSave = document.getElementById('btn-save-change-password');
 
-            if (!cpModal || !cpTarget || !cpInput) return;
+          if (!cpModal || !cpTarget || !cpInput) return;
 
-            cpTarget.textContent = `${userObj.display_name} (@${username})`;
-            cpInput.value = '';
-            cpModal.classList.remove('hidden');
+          cpTarget.textContent = `${userObj.display_name} (@${username})`;
+          cpInput.value = '';
+          cpModal.classList.remove('hidden');
 
-            const closeCp = () => {
-              cpModal.classList.add('hidden');
-            };
-
-            cpClose.onclick = closeCp;
-            cpCancel.onclick = closeCp;
-
-            cpSave.onclick = async () => {
-              const newPassword = cpInput.value;
-              if (!newPassword || newPassword.trim().length === 0) {
-                this.uiManager.showToast('La contraseña no puede estar vacía.', 'error');
-                return;
-              }
-
-              cpSave.disabled = true;
-              try {
-                const updateRes = await fetch('/api/admin/update-user', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    userId,
-                    displayName: userObj.display_name,
-                    color: userObj.color,
-                    is_admin: userObj.is_admin === 1,
-                    password: newPassword
-                  })
-                });
-
-                if (updateRes.ok) {
-                  this.uiManager.showToast('Contraseña actualizada con éxito.', 'success');
-                  closeCp();
-                } else {
-                  const err = await updateRes.json();
-                  this.uiManager.showToast(err.error || 'Error al actualizar contraseña.', 'error');
-                }
-              } catch (e) {
-                this.uiManager.showToast('Error de conexión al actualizar contraseña.', 'error');
-              } finally {
-                cpSave.disabled = false;
-              }
-            };
+          const closeCp = () => {
+            cpModal.classList.add('hidden');
           };
-        });
 
-        usersTable.querySelectorAll('.admin-role-select').forEach(select => {
-          select.onchange = async () => {
-            const userId = select.getAttribute('data-userid');
-            const newRole = select.value;
-            const userObj = users.find(u => u.id === userId);
-            if (!userObj) return;
+          cpClose.onclick = closeCp;
+          cpCancel.onclick = closeCp;
 
-            const updateRes = await fetch('/api/admin/update-user', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userId,
-                displayName: userObj.display_name,
-                color: userObj.color,
-                is_admin: newRole === 'admin'
-              })
-            });
-
-            if (updateRes.ok) {
-              this.uiManager.showToast('Rol de usuario actualizado.', 'success');
-              loadUsers();
-            } else {
-              const err = await updateRes.json();
-              this.uiManager.showToast(err.error || 'Error al actualizar usuario.', 'error');
-              loadUsers();
+          cpSave.onclick = async () => {
+            const newPassword = cpInput.value;
+            if (!newPassword || newPassword.trim().length === 0) {
+              this.uiManager.showToast('La contraseña no puede estar vacía.', 'error');
+              return;
             }
-          };
-        });
 
-        usersTable.querySelectorAll('.btn-admin-delete-user').forEach(btn => {
-          btn.onclick = async () => {
-            const userId = btn.getAttribute('data-userid');
-            if (confirm('¿Estás seguro de que deseas eliminar permanentemente este usuario? Se cerrarán todas sus sesiones.')) {
-              const delRes = await fetch('/api/admin/delete-user', {
+            cpSave.disabled = true;
+            try {
+              const updateRes = await fetch('/api/admin/update-user', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId })
+                body: JSON.stringify({
+                  userId,
+                  displayName: userObj.display_name,
+                  color: userObj.color,
+                  is_admin: userObj.is_admin === 1,
+                  password: newPassword
+                })
               });
-              if (delRes.ok) {
-                this.uiManager.showToast('Usuario eliminado con éxito.', 'success');
-                loadUsers();
+
+              if (updateRes.ok) {
+                this.uiManager.showToast('Contraseña actualizada con éxito.', 'success');
+                closeCp();
               } else {
-                const err = await delRes.json();
-                this.uiManager.showToast(err.error || 'Error al eliminar usuario.', 'error');
+                const err = await updateRes.json();
+                this.uiManager.showToast(err.error || 'Error al actualizar contraseña.', 'error');
               }
+            } catch (e) {
+              this.uiManager.showToast('Error de conexión al actualizar contraseña.', 'error');
+            } finally {
+              cpSave.disabled = false;
             }
           };
-        });
-      } catch (e) {
-        usersTable.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--color-danger); padding: 10px;">Error al cargar lista de usuarios</td></tr>';
-      }
+        };
+      });
+
+      usersTable.querySelectorAll('.admin-role-select').forEach(select => {
+        select.onchange = async () => {
+          const userId = select.getAttribute('data-userid');
+          const newRole = select.value;
+          const userObj = users.find(u => u.id === userId);
+          if (!userObj) return;
+
+          const updateRes = await fetch('/api/admin/update-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId,
+              displayName: userObj.display_name,
+              color: userObj.color,
+              is_admin: newRole === 'admin'
+            })
+          });
+
+          if (updateRes.ok) {
+            this.uiManager.showToast('Rol de usuario actualizado.', 'success');
+            loadUsers();
+          } else {
+            const err = await updateRes.json();
+            this.uiManager.showToast(err.error || 'Error al actualizar usuario.', 'error');
+            loadUsers();
+          }
+        };
+      });
+
+      usersTable.querySelectorAll('.btn-admin-delete-user').forEach(btn => {
+        btn.onclick = async () => {
+          const userId = btn.getAttribute('data-userid');
+          if (confirm('¿Estás seguro de que deseas eliminar permanentemente este usuario? Se cerrarán todas sus sesiones.')) {
+            const delRes = await fetch('/api/admin/delete-user', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId })
+            });
+            if (delRes.ok) {
+              this.uiManager.showToast('Usuario eliminado con éxito.', 'success');
+              loadUsers();
+            } else {
+              const err = await delRes.json();
+              this.uiManager.showToast(err.error || 'Error al eliminar usuario.', 'error');
+            }
+          }
+        };
+      });
     };
 
     btnAdd.onclick = async () => {

@@ -1699,33 +1699,37 @@ const server = http.createServer(async (req, res) => {
           };
         });
 
-        const dbProjectIds = new Set(dbProjects.map(p => p.id));
-        const files = fs.readdirSync(PROJECTS_DIR);
         const projectsList = [...enrichedDbProjects];
 
-        files.forEach(file => {
-          if (file.endsWith('.json') && !file.includes('.backup_') && !file.endsWith('.tmp')) {
-            const projectId = file.slice(0, -5);
-            if (!dbProjectIds.has(projectId)) {
-              try {
-                const filePath = path.join(PROJECTS_DIR, file);
-                const stats = fs.statSync(filePath);
-                const state = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-                projectsList.push({
-                  id: projectId,
-                  name: state.name || projectId,
-                  tableCount: state.tables ? state.tables.length : 0,
-                  relationshipCount: state.relationships ? state.relationships.length : 0,
-                  lastModified: stats.mtime,
-                  role: 'public',
-                  owner_name: 'Sistema'
-                });
-              } catch (e) {
-                // Ignore malformed files
+        // Solo los administradores pueden ver archivos residuales no registrados en BD
+        if (session.is_admin === 1) {
+          const dbProjectIds = new Set(dbProjects.map(p => p.id));
+          const files = fs.readdirSync(PROJECTS_DIR);
+
+          files.forEach(file => {
+            if (file.endsWith('.json') && !file.includes('.backup_') && !file.endsWith('.tmp')) {
+              const projectId = file.slice(0, -5);
+              if (!dbProjectIds.has(projectId)) {
+                try {
+                  const filePath = path.join(PROJECTS_DIR, file);
+                  const stats = fs.statSync(filePath);
+                  const state = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+                  projectsList.push({
+                    id: projectId,
+                    name: state.name || projectId,
+                    tableCount: state.tables ? state.tables.length : 0,
+                    relationshipCount: state.relationships ? state.relationships.length : 0,
+                    lastModified: stats.mtime,
+                    role: 'public',
+                    owner_name: 'Sistema'
+                  });
+                } catch (e) {
+                  // Ignore malformed files
+                }
               }
             }
-          }
-        });
+          });
+        }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(projectsList));
@@ -1781,6 +1785,53 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
+      return;
+    }
+
+    // POST /api/rename-project - Rename a project (Owner or Admin only)
+    if (req.method === 'POST' && cleanUrl === '/api/rename-project') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const { projectId, newName } = JSON.parse(body || '{}');
+          if (!projectId || !newName || !newName.trim()) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'ID de proyecto y nuevo nombre son requeridos.' }));
+            return;
+          }
+
+          const trimmedName = newName.trim();
+          const project = ProjectRepository.getProject(projectId);
+          if (project) {
+            const isOwner = project.owner_id === session.user_id;
+            const isAdmin = session.is_admin === 1;
+            if (!isOwner && !isAdmin) {
+              res.writeHead(403, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Permiso denegado. Solo el creador o un administrador pueden renombrar este proyecto.' }));
+              return;
+            }
+            ProjectRepository.updateProjectName(projectId, trimmedName);
+          }
+
+          const filePath = getProjectPath(projectId);
+          if (fs.existsSync(filePath)) {
+            try {
+              const state = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+              state.name = trimmedName;
+              fs.writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf8');
+            } catch (fileErr) {
+              console.error('Error al actualizar nombre en archivo de proyecto:', fileErr);
+            }
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, name: trimmedName }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
       return;
     }
 
