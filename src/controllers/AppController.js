@@ -17,6 +17,7 @@ import { CollabController } from './CollabController.js';
 import { DiagramController } from './DiagramController.js';
 import { ToolbarController } from './ToolbarController.js';
 import { NotesController } from './NotesController.js';
+import { McpController } from './McpController.js';
 
 export class AppController {
   constructor(config) {
@@ -137,6 +138,19 @@ export class AppController {
       }
     });
 
+    // MCP Controller (Database connections & live query runner)
+    this.mcpController = new McpController({
+      projectId: this.projectId,
+      stateManager: this.stateManager,
+      history: this.history,
+      uiManager: this.uiManager,
+      diagramController: this.diagramController
+    });
+
+    this.mcpController.onConnectionsChanged = (conns) => {
+      this.queryController?.updateConnections(conns);
+    };
+
     // Interaction Controller
     this.interactionController = new InteractionController({
       canvasManager: this.canvasManager,
@@ -235,8 +249,9 @@ export class AppController {
       }
     }, 200);
 
-    // Setup query manager and AI configurations
+    // Setup query manager, MCP connections and AI configurations
     this.queryController.init();
+    this.mcpController.init();
     this.aiController.init();
 
     // Initialize feedback manager after user info is available

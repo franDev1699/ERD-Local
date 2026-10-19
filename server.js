@@ -14,6 +14,8 @@ const AiPromptRepository = require('./src/db/AiPromptRepository');
 const SystemSettingsRepository = require('./src/db/SystemSettingsRepository');
 const UserAiConfigRepository = require('./src/db/UserAiConfigRepository');
 const FeedbackRepository = require('./src/db/FeedbackRepository');
+const McpConnectionRepository = require('./src/db/McpConnectionRepository');
+const { McpClientFactory } = require('./src/server/mcp/McpClient');
 const { hashPassword, verifyPassword } = require('./src/db/auth');
 const rateLimiter = require('./src/security/rateLimiter');
 const { validatePassword } = require('./src/security/passwordValidator');
@@ -2017,6 +2019,251 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // ==========================================
+    // MCP DATABASE INTEGRATION ROUTES (Zero-dep)
+    // ==========================================
+
+    // GET /api/mcp-connections?project=...
+    if (req.method === 'GET' && cleanUrl === '/api/mcp-connections') {
+      try {
+        const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const projectId = urlObj.searchParams.get('project');
+        if (!projectId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Proyecto no especificado' }));
+          return;
+        }
+
+        const role = ProjectRepository.getProjectRole(projectId, session.user_id);
+        if (!role && session.is_admin !== 1) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No tienes acceso a este proyecto.' }));
+          return;
+        }
+
+        // Ensure project exists in SQLite if it's an admin or legacy disk project
+        if (!ProjectRepository.isProjectRegistered(projectId)) {
+          let displayName = projectId;
+          const diskState = loadProjectState(projectId);
+          if (diskState && diskState.name) displayName = diskState.name;
+          ProjectRepository.createProject({
+            id: projectId,
+            display_name: displayName,
+            owner_id: session.user_id
+          });
+        }
+
+        const connections = McpConnectionRepository.getConnectionsByProject(projectId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, connections }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/mcp-connections - Create or update connection
+    if (req.method === 'POST' && cleanUrl === '/api/mcp-connections') {
+      try {
+        const data = await readJsonBody(req);
+        const { id, projectId, name, type, command, args, env, url, db_path, is_read_only } = data;
+
+        if (!projectId || !name || !type) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'projectId, name y type son obligatorios.' }));
+          return;
+        }
+
+        const role = ProjectRepository.getProjectRole(projectId, session.user_id);
+        if (role !== 'owner' && role !== 'editor' && session.is_admin !== 1) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Permiso denegado. Se requiere rol de editor u owner.' }));
+          return;
+        }
+
+        // Ensure project exists in SQLite before inserting foreign key
+        if (!ProjectRepository.isProjectRegistered(projectId)) {
+          let displayName = projectId;
+          const diskState = loadProjectState(projectId);
+          if (diskState && diskState.name) displayName = diskState.name;
+          ProjectRepository.createProject({
+            id: projectId,
+            display_name: displayName,
+            owner_id: session.user_id
+          });
+        }
+
+        const connId = id || `mcp-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+        const existing = McpConnectionRepository.getConnectionById(connId);
+
+        let saved;
+        if (existing) {
+          saved = McpConnectionRepository.updateConnection(connId, {
+            name,
+            type,
+            command,
+            args: typeof args === 'object' ? JSON.stringify(args) : args,
+            env: typeof env === 'object' ? JSON.stringify(env) : env,
+            url,
+            db_path,
+            is_read_only: is_read_only !== undefined ? is_read_only : 1
+          });
+        } else {
+          saved = McpConnectionRepository.createConnection({
+            id: connId,
+            project_id: projectId,
+            name,
+            type,
+            command,
+            args: typeof args === 'object' ? JSON.stringify(args) : args,
+            env: typeof env === 'object' ? JSON.stringify(env) : env,
+            url,
+            db_path,
+            is_read_only: is_read_only !== undefined ? is_read_only : 1
+          });
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, connection: saved }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/mcp-connections/delete - Delete connection
+    if (req.method === 'POST' && cleanUrl === '/api/mcp-connections/delete') {
+      try {
+        const { id } = await readJsonBody(req);
+        if (!id) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'id de conexión requerido' }));
+          return;
+        }
+
+        const conn = McpConnectionRepository.getConnectionById(id);
+        if (!conn) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Conexión no encontrada' }));
+          return;
+        }
+
+        const role = ProjectRepository.getProjectRole(conn.project_id, session.user_id);
+        if (role !== 'owner' && role !== 'editor' && session.is_admin !== 1) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Permiso denegado.' }));
+          return;
+        }
+
+        McpConnectionRepository.deleteConnection(id);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // POST /api/mcp-connections/test - Test connection & list tools
+    if (req.method === 'POST' && cleanUrl === '/api/mcp-connections/test') {
+      let client = null;
+      try {
+        const body = await readJsonBody(req);
+        let connConfig = body;
+        if (body.id) {
+          const stored = McpConnectionRepository.getConnectionById(body.id);
+          if (stored) connConfig = { ...stored, ...body };
+        }
+
+        client = McpClientFactory.createClient(connConfig);
+        const testResult = await client.test();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, result: testResult }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      } finally {
+        if (client) client.close();
+      }
+      return;
+    }
+
+    // POST /api/mcp-connections/introspect - Reverse engineering schema
+    if (req.method === 'POST' && cleanUrl === '/api/mcp-connections/introspect') {
+      let client = null;
+      try {
+        const { id } = await readJsonBody(req);
+        const conn = McpConnectionRepository.getConnectionById(id);
+        if (!conn) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Conexión MCP no encontrada' }));
+          return;
+        }
+
+        const role = ProjectRepository.getProjectRole(conn.project_id, session.user_id);
+        if (role !== 'owner' && role !== 'editor' && session.is_admin !== 1) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Permiso denegado. Se requiere ser editor u owner.' }));
+          return;
+        }
+
+        client = McpClientFactory.createClient(conn);
+        const schema = await client.introspectSchema();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, schema }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      } finally {
+        if (client) client.close();
+      }
+      return;
+    }
+
+    // POST /api/mcp-connections/query - Execute real SQL query via MCP
+    if (req.method === 'POST' && cleanUrl === '/api/mcp-connections/query') {
+      let client = null;
+      try {
+        const { id, sql } = await readJsonBody(req);
+        if (!id || !sql) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'id y sql son requeridos' }));
+          return;
+        }
+
+        const conn = McpConnectionRepository.getConnectionById(id);
+        if (!conn) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Conexión MCP no encontrada' }));
+          return;
+        }
+
+        const role = ProjectRepository.getProjectRole(conn.project_id, session.user_id);
+        if (!role && session.is_admin !== 1) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No tienes acceso a este proyecto' }));
+          return;
+        }
+
+        client = McpClientFactory.createClient(conn);
+        const queryResult = await client.executeQuery(sql);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, ...queryResult }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      } finally {
+        if (client) client.close();
+      }
+      return;
+    }
+
     // GET /api/ai/prompts or /api/ai-prompts
     if (req.method === 'GET' && (cleanUrl === '/api/ai/prompts' || cleanUrl === '/api/ai-prompts')) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2840,7 +3087,16 @@ server.on('upgrade', (req, socket) => {
   if (!role) {
     // Admins can access any project
     if (session.is_admin) {
-      console.log(`[WebSocket] Admin "${session.username}" accediendo al proyecto ${projectId} sin membresía explícita → rol owner.`);
+      if (!ProjectRepository.isProjectRegistered(projectId)) {
+        let displayName = projectId;
+        const diskState = loadProjectState(projectId);
+        if (diskState && diskState.name) displayName = diskState.name;
+        ProjectRepository.createProject({
+          id: projectId,
+          display_name: displayName,
+          owner_id: userId
+        });
+      }
       role = 'owner';
     } else {
       const exists = ProjectRepository.isProjectRegistered(projectId);

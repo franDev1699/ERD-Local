@@ -3722,4 +3722,10 @@ input[name="feedback-type"]:checked + .feedback-type-chip {
   to { transform: rotate(360deg); }
 }
 
+.active-tab {
+  background: var(--color-primary) !important;
+  color: white !important;
+  border-color: var(--color-primary) !important;
+}
+
 

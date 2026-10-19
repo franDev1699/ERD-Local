@@ -139,11 +139,12 @@ export class QueryController {
       });
     }
 
-    // Test (Simulate) Query on Mock Data
+    // Test (Real via MCP or Simulate) Query
     if (btnTest) {
-      btnTest.addEventListener("click", () => {
+      btnTest.addEventListener("click", async () => {
         const sqlTextarea = document.getElementById("query-sql-textarea");
         const resultsDiv = document.getElementById("query-test-results");
+        const connSelect = document.getElementById("query-connection-select");
 
         if (!sqlTextarea || !resultsDiv) return;
 
@@ -153,6 +154,91 @@ export class QueryController {
           return;
         }
 
+        const selectedMcpId = connSelect ? connSelect.value : null;
+
+        // REAL EXECUTION VIA MCP
+        if (selectedMcpId) {
+          this.showQueryResultsPanel("Ejecución en Base de Datos Real (MCP):");
+          this.switchQueryTab('test');
+          resultsDiv.style.color = "#818cf8";
+          resultsDiv.textContent = "Ejecutando consulta en la base de datos vía MCP...";
+
+          try {
+            const res = await fetch('/api/mcp-connections/query', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: selectedMcpId, sql })
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+              resultsDiv.style.color = "#ef4444";
+              resultsDiv.textContent = `Error en base de datos: ${data.error}`;
+              return;
+            }
+
+            resultsDiv.style.color = "#10b981";
+            resultsDiv.innerHTML = "";
+
+            const titleEl = document.createElement("div");
+            titleEl.style.fontWeight = "bold";
+            titleEl.style.marginBottom = "6px";
+            titleEl.textContent = `✅ Consulta ejecutada exitosamente (${data.totalCount} filas, ${data.executionTimeMs} ms)`;
+            resultsDiv.appendChild(titleEl);
+
+            if (!data.rows || data.rows.length === 0) {
+              const emptyMsg = document.createElement("div");
+              emptyMsg.style.color = "var(--color-text-muted)";
+              emptyMsg.style.fontStyle = "italic";
+              emptyMsg.textContent = "La consulta no devolvió filas.";
+              resultsDiv.appendChild(emptyMsg);
+              return;
+            }
+
+            const tableEl = document.createElement("table");
+            tableEl.style.width = "100%";
+            tableEl.style.borderCollapse = "collapse";
+            tableEl.style.marginTop = "6px";
+            tableEl.style.border = "1px solid var(--color-border)";
+
+            const thead = document.createElement("thead");
+            const headerRow = document.createElement("tr");
+            headerRow.style.background = "rgba(16, 185, 129, 0.1)";
+
+            const keys = Object.keys(data.rows[0]);
+            keys.forEach(k => {
+              const th = document.createElement("th");
+              th.style.padding = "6px 8px";
+              th.style.border = "1px solid var(--color-border)";
+              th.style.textAlign = "left";
+              th.textContent = k;
+              headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            tableEl.appendChild(thead);
+
+            const tbody = document.createElement("tbody");
+            data.rows.forEach(row => {
+              const tr = document.createElement("tr");
+              keys.forEach(k => {
+                const td = document.createElement("td");
+                td.style.padding = "6px 8px";
+                td.style.border = "1px solid var(--color-border)";
+                td.textContent = row[k] !== null && row[k] !== undefined ? String(row[k]) : 'NULL';
+                tr.appendChild(td);
+              });
+              tbody.appendChild(tr);
+            });
+            tableEl.appendChild(tbody);
+            resultsDiv.appendChild(tableEl);
+          } catch (err) {
+            resultsDiv.style.color = "#ef4444";
+            resultsDiv.textContent = `Error de conexión: ${err.message}`;
+          }
+          return;
+        }
+
+        // SIMULATION FALLBACK
         const state = this.stateManager.getState();
         const simResult = this.simulateQuery(sql, state.tables);
 
@@ -670,5 +756,22 @@ export class QueryController {
     });
 
     if (window.lucide) window.lucide.createIcons();
+  }
+
+  updateConnections(connections = []) {
+    const select = document.getElementById("query-connection-select");
+    if (!select) return;
+    const currentVal = select.value;
+    select.innerHTML = '<option value="">Simulación (Diagrama)</option>';
+    connections.forEach(conn => {
+      const opt = document.createElement("option");
+      opt.value = conn.id;
+      const typeLabel = conn.type === 'builtin_sqlite' ? 'SQLite' : 'MCP';
+      opt.textContent = `${conn.name} (${typeLabel})`;
+      select.appendChild(opt);
+    });
+    if (currentVal && connections.some(c => c.id === currentVal)) {
+      select.value = currentVal;
+    }
   }
 }

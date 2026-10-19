@@ -114,6 +114,7 @@
 								<button id="btn-save-project" class="btn btn-tb btn-project" title="Guardar Proyecto con Nombre"><i data-lucide="save"></i> Guardar</button>
 								<button id="btn-import-json-trigger" class="btn btn-tb btn-project" title="Cargar archivo JSON"><i data-lucide="upload"></i> Cargar JSON</button>
 								<button id="btn-import-sql-modal-trigger" class="btn btn-tb btn-project" title="Importar código SQL"><i data-lucide="database"></i> Importar SQL</button>
+								<button id="btn-mcp-modal-trigger" class="btn btn-tb btn-project" title="Conectar Base de Datos vía MCP"><i data-lucide="network"></i> Base de Datos (MCP)</button>
 								<button id="btn-clear-all" class="btn btn-tb btn-danger-outline" title="Limpiar todo el diagrama"><i data-lucide="trash-2"></i> Limpiar Todo</button>
 							</div>
 						</div>
@@ -375,6 +376,97 @@
 					<div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px;">
 						<button id="btn-execute-import-sql" class="btn btn-primary"><i data-lucide="play"></i> Importar y Generar</button>
 					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- MCP Database Connections Modal -->
+		<div id="mcp-modal" class="modal hidden">
+			<div class="modal-content" style="max-width: 800px; width: 95%;">
+				<div class="modal-header">
+					<h2 style="display: flex; align-items: center; gap: 8px;">
+						<i data-lucide="network" style="color: var(--color-primary); width: 18px; height: 18px;"></i>
+						Bases de Datos MCP (Model Context Protocol)
+					</h2>
+					<button id="btn-close-mcp-modal" class="btn-icon"><i data-lucide="x"></i></button>
+				</div>
+				<div class="modal-body" style="display: flex; flex-direction: column; gap: 16px;">
+					<p style="font-size: 0.85rem; color: var(--color-text-dim); margin: 0;">
+						Conecta bases de datos mediante el protocolo abierto MCP o el motor SQLite nativo. Permite introspección de esquemas y ejecución de consultas en vivo sin dependencias externas.
+					</p>
+
+					<!-- Tab buttons: Connections List / Add Connection -->
+					<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-border); padding-bottom: 8px;">
+						<div style="display: flex; gap: 8px;">
+							<button id="btn-mcp-tab-list" class="btn btn-secondary active-tab" style="font-size: 0.8rem; padding: 5px 12px;">Mis Conexiones</button>
+							<button id="btn-mcp-tab-add" class="btn btn-secondary" style="font-size: 0.8rem; padding: 5px 12px;"><i data-lucide="plus" style="width: 14px; height: 14px;"></i> Nueva Conexión</button>
+						</div>
+					</div>
+
+					<!-- Panel 1: Connections List -->
+					<div id="mcp-panel-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">
+						<div id="mcp-connections-list" style="display: flex; flex-direction: column; gap: 8px;">
+							<!-- Dynamic list of connections -->
+						</div>
+					</div>
+
+					<!-- Panel 2: Form to Add Connection -->
+					<div id="mcp-panel-add" class="hidden" style="display: flex; flex-direction: column; gap: 12px; background: var(--color-bg-tertiary); padding: 14px; border-radius: 8px; border: 1px solid var(--color-border);">
+						<div style="display: flex; gap: 12px; flex-wrap: wrap;">
+							<div style="flex: 1; min-width: 200px;">
+								<label style="display: block; font-size: 0.78rem; color: var(--color-text-muted); margin-bottom: 4px;">Nombre de la Conexión:</label>
+								<input type="text" id="mcp-name-input" placeholder="ej: SQLite Local, Postgres Producción..." style="width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-primary); color: var(--color-text-main); font-size: 0.85rem;" />
+							</div>
+							<div style="width: 220px;">
+								<label style="display: block; font-size: 0.78rem; color: var(--color-text-muted); margin-bottom: 4px;">Tipo de Conexión:</label>
+								<select id="mcp-type-select" style="width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-primary); color: var(--color-text-main); font-size: 0.85rem;">
+									<option value="builtin_sqlite">SQLite Nativo (Zero-dep)</option>
+									<option value="stdio">MCP Stdio (CLI / npx)</option>
+									<option value="http">MCP HTTP / SSE</option>
+								</select>
+							</div>
+						</div>
+
+						<!-- Conditional Fields -->
+						<div id="mcp-fields-sqlite">
+							<label style="display: block; font-size: 0.78rem; color: var(--color-text-muted); margin-bottom: 4px;">Ruta del archivo SQLite (.db):</label>
+							<input type="text" id="mcp-sqlite-path" placeholder="data/app.db (por defecto)" value="data/app.db" style="width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-primary); color: var(--color-text-main); font-size: 0.85rem;" />
+							<span style="font-size: 0.75rem; color: var(--color-text-muted); display: block; margin-top: 4px;">Usa el motor SQLite nativo de Node.js sin instalar módulos adicionales.</span>
+						</div>
+
+						<div id="mcp-fields-stdio" class="hidden">
+							<div style="display: flex; gap: 10px; margin-bottom: 8px; flex-wrap: wrap;">
+								<div style="width: 140px;">
+									<label style="display: block; font-size: 0.78rem; color: var(--color-text-muted); margin-bottom: 4px;">Comando:</label>
+									<input type="text" id="mcp-stdio-command" placeholder="npx" value="npx" style="width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-primary); color: var(--color-text-main); font-size: 0.85rem;" />
+								</div>
+								<div style="flex: 1; min-width: 220px;">
+									<label style="display: block; font-size: 0.78rem; color: var(--color-text-muted); margin-bottom: 4px;">Argumentos (separados por espacio o JSON array):</label>
+									<input type="text" id="mcp-stdio-args" placeholder="-y @modelcontextprotocol/server-postgres postgresql://localhost/mydb" style="width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-primary); color: var(--color-text-main); font-size: 0.85rem;" />
+								</div>
+							</div>
+							<label style="display: block; font-size: 0.78rem; color: var(--color-text-muted); margin-bottom: 4px;">Variables de entorno (una por línea, CLAVE=valor):</label>
+							<textarea id="mcp-stdio-env" rows="5" placeholder="MYSQL_HOST=midominio.com&#10;MYSQL_PORT=3306&#10;MYSQL_USER=usuario&#10;MYSQL_PASS=contraseña&#10;MYSQL_DB=base_de_datos" style="width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-primary); color: var(--color-text-main); font-size: 0.8rem; font-family: monospace; resize: vertical;"></textarea>
+						</div>
+
+						<div id="mcp-fields-http" class="hidden">
+							<label style="display: block; font-size: 0.78rem; color: var(--color-text-muted); margin-bottom: 4px;">URL del Endpoint MCP:</label>
+							<input type="text" id="mcp-http-url" placeholder="http://localhost:8000/mcp" style="width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-primary); color: var(--color-text-main); font-size: 0.85rem;" />
+						</div>
+
+						<div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px; flex-wrap: wrap; gap: 10px;">
+							<label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; color: var(--color-text-main);">
+								<input type="checkbox" id="mcp-readonly-checkbox" checked />
+								<span>Modo Sólo Lectura (Seguridad: bloquea sentencias destructivas)</span>
+							</label>
+							<div style="display: flex; gap: 8px;">
+								<button id="btn-mcp-cancel-add" class="btn btn-secondary" style="font-size: 0.8rem; padding: 6px 12px;">Cancelar</button>
+								<button id="btn-mcp-save" class="btn btn-primary" style="font-size: 0.8rem; padding: 6px 14px;">Guardar Conexión</button>
+							</div>
+						</div>
+					</div>
+
+					<div id="mcp-test-status" class="hidden" style="padding: 10px; border-radius: 6px; font-size: 0.8rem; line-height: 1.4;"></div>
 				</div>
 			</div>
 		</div>
@@ -674,13 +766,19 @@
 									<label style="font-size: 0.8rem; color: var(--color-text-muted); white-space: nowrap;">Nombre:</label>
 									<input type="text" id="query-name-input" placeholder="ej: Obtener ventas del mes" style="flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-size: 0.85rem; min-width: 0;" />
 								</div>
-								<div style="display: flex; align-items: center; gap: 8px; width: 240px; flex-shrink: 0;">
+								<div style="display: flex; align-items: center; gap: 8px; width: 200px; flex-shrink: 0;">
 									<label style="font-size: 0.8rem; color: var(--color-text-muted); white-space: nowrap;">Motor:</label>
 									<select id="query-engine-select" style="flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-size: 0.85rem;">
 										<option value="postgres">PostgreSQL</option>
 										<option value="mariadb">MySQL / MariaDB</option>
 										<option value="sqlite">SQLite</option>
 										<option value="sqlserver">SQL Server</option>
+									</select>
+								</div>
+								<div style="display: flex; align-items: center; gap: 8px; width: 240px; flex-shrink: 0;">
+									<label style="font-size: 0.8rem; color: var(--color-text-muted); white-space: nowrap;">BD (MCP):</label>
+									<select id="query-connection-select" style="flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-main); font-size: 0.85rem;">
+										<option value="">Simulación (Diagrama)</option>
 									</select>
 								</div>
 							</div>
