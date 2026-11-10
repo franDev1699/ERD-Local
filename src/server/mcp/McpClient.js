@@ -481,6 +481,9 @@ class StdioMcpClient extends BaseMcpClient {
   async test() {
     const initRes = await this._ensureInitialized();
     const tools = await this.listTools();
+    if (this._findQueryTool(tools)) {
+      await this.executeQuery('SELECT 1 AS ok', { skipLimit: true });
+    }
     return {
       connected: true,
       serverInfo: initRes?.serverInfo || { name: this.config.name },

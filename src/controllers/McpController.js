@@ -23,8 +23,30 @@ export class McpController {
     this.tabAddBtn = document.getElementById('btn-mcp-tab-add');
     this.panelList = document.getElementById('mcp-panel-list');
     this.panelAdd = document.getElementById('mcp-panel-add');
+    this.panelImport = document.getElementById('mcp-panel-import');
     this.connectionsListContainer = document.getElementById('mcp-connections-list');
     this.testStatusEl = document.getElementById('mcp-test-status');
+
+    // Selective Import UI elements
+    this.pendingSchema = null;
+    this.pendingImportConn = null;
+    this.selectedImportTableIds = new Set();
+    this.importConnTitle = document.getElementById('mcp-import-conn-title');
+    this.importSelectionCount = document.getElementById('mcp-import-selection-count');
+    this.importSearchInput = document.getElementById('mcp-import-search');
+    this.importPrefixSection = document.getElementById('mcp-import-prefix-section');
+    this.importPrefixGroups = document.getElementById('mcp-import-prefix-groups');
+    this.importTablesList = document.getElementById('mcp-import-tables-list');
+    this.importGroupModeSelect = document.getElementById('mcp-import-group-mode');
+    this.importGroupNameInput = document.getElementById('mcp-import-group-name');
+    this.importExistingGroupSelect = document.getElementById('mcp-import-existing-group');
+    this.importOverwriteCheckbox = document.getElementById('mcp-import-overwrite-existing');
+    this.btnBackFromImport = document.getElementById('btn-mcp-back-from-import');
+    this.btnSelectAll = document.getElementById('btn-mcp-select-all');
+    this.btnDeselectAll = document.getElementById('btn-mcp-deselect-all');
+    this.btnSelectRelated = document.getElementById('btn-mcp-select-related');
+    this.btnCancelImport = document.getElementById('btn-mcp-cancel-import');
+    this.btnConfirmImport = document.getElementById('btn-mcp-confirm-import');
 
     // Form inputs
     this.nameInput = document.getElementById('mcp-name-input');
@@ -82,11 +104,44 @@ export class McpController {
     if (this.saveBtn) {
       this.saveBtn.addEventListener('click', () => this.saveConnection());
     }
+
+    if (this.btnBackFromImport) {
+      this.btnBackFromImport.addEventListener('click', () => this.switchTab('list'));
+    }
+
+    if (this.btnCancelImport) {
+      this.btnCancelImport.addEventListener('click', () => this.switchTab('list'));
+    }
+
+    if (this.importSearchInput) {
+      this.importSearchInput.addEventListener('input', () => this._renderImportTablesList());
+    }
+
+    if (this.btnSelectAll) {
+      this.btnSelectAll.addEventListener('click', () => this._toggleVisibleTables(true));
+    }
+
+    if (this.btnDeselectAll) {
+      this.btnDeselectAll.addEventListener('click', () => this._toggleVisibleTables(false));
+    }
+
+    if (this.btnSelectRelated) {
+      this.btnSelectRelated.addEventListener('click', () => this._selectRelatedTables());
+    }
+
+    if (this.importGroupModeSelect) {
+      this.importGroupModeSelect.addEventListener('change', () => this._handleImportGroupModeChange());
+    }
+
+    if (this.btnConfirmImport) {
+      this.btnConfirmImport.addEventListener('click', () => this.executeSelectiveImport());
+    }
   }
 
   openModal() {
     if (!this.modal) return;
     this.modal.classList.remove('hidden');
+    this.switchTab('list');
     this.loadConnections();
     if (window.lucide) window.lucide.createIcons();
   }
@@ -98,17 +153,20 @@ export class McpController {
   }
 
   switchTab(tab) {
+    this.panelList?.classList.toggle('hidden', tab !== 'list');
+    this.panelAdd?.classList.toggle('hidden', tab !== 'add');
+    this.panelImport?.classList.toggle('hidden', tab !== 'import');
+
     if (tab === 'list') {
-      this.panelList?.classList.remove('hidden');
-      this.panelAdd?.classList.add('hidden');
       this.tabListBtn?.classList.add('active-tab');
       this.tabAddBtn?.classList.remove('active-tab');
-    } else {
-      this.panelList?.classList.add('hidden');
-      this.panelAdd?.classList.remove('hidden');
+    } else if (tab === 'add') {
       this.tabListBtn?.classList.remove('active-tab');
       this.tabAddBtn?.classList.add('active-tab');
       this._resetForm();
+    } else if (tab === 'import') {
+      this.tabListBtn?.classList.remove('active-tab');
+      this.tabAddBtn?.classList.remove('active-tab');
     }
     this.editingId = null;
     if (this.saveBtn) this.saveBtn.textContent = 'Guardar Conexión';
@@ -349,9 +407,8 @@ export class McpController {
   }
 
   async introspectConnection(id) {
-    if (!confirm('¿Deseas importar el esquema de esta base de datos al diagrama actual?')) return;
-
-    this._showStatus('Introspeccionando esquema de base de datos vía MCP...', 'info');
+    const conn = this.connections.find(c => c.id === id);
+    this._showStatus('Obteniendo lista de tablas y esquema vía MCP...', 'info');
     try {
       const res = await fetch('/api/mcp-connections/introspect', {
         method: 'POST',
@@ -360,59 +417,520 @@ export class McpController {
       });
       const data = await res.json();
       if (data.success && data.schema) {
-        const { tables = [], relationships = [] } = data.schema;
+        const { tables = [] } = data.schema;
         if (tables.length === 0) {
           this.uiManager.showToast('No se encontraron tablas en la base de datos.', 'info');
           this._showStatus('No se encontraron tablas en la base de datos.', 'info');
           return;
         }
 
-        // Push current state to undo history
-        const prevState = this.stateManager.getState();
-        this.history.push(prevState);
-
-        // Merge or replace
-        const currentTables = prevState.tables || [];
-        const currentRels = prevState.relationships || [];
-
-        // Simple merge: keep existing, add new tables avoiding name collisions
-        const mergedTables = [...currentTables];
-        const existingNames = new Set(currentTables.map(t => t.name.toLowerCase()));
-
-        let addedCount = 0;
-        tables.forEach(newTbl => {
-          if (!existingNames.has(newTbl.name.toLowerCase())) {
-            mergedTables.push(newTbl);
-            addedCount++;
-          }
-        });
-
-        const mergedRels = [...currentRels, ...relationships];
-
-        this.stateManager.setState({
-          ...prevState,
-          tables: mergedTables,
-          relationships: mergedRels
-        });
-
-        this.uiManager.showToast(`Esquema importado: ${addedCount} tablas añadidas.`, 'success');
-        this._showStatus(`✅ Esquema importado con éxito: ${addedCount} tablas agregadas y ${relationships.length} relaciones.`, 'success');
-        
-        // Auto layout and refresh
-        if (this.diagramController) {
-          this.diagramController.refreshUI();
-          this.diagramController.autoLayout();
-        }
-
-        setTimeout(() => this.closeModal(), 1200);
+        this._openSelectiveImportPanel(conn || { id, name: 'Base de Datos' }, data.schema);
       } else {
         this._showStatus(`❌ Error en introspección: ${data.error}`, 'error');
-        this.uiManager.showToast(data.error || 'Error al importar esquema', 'error');
+        this.uiManager.showToast(data.error || 'Error al obtener esquema', 'error');
       }
     } catch (err) {
       this._showStatus(`❌ Error de red: ${err.message}`, 'error');
       this.uiManager.showToast('Error de red al introspeccionar', 'error');
     }
+  }
+
+  _extractTablePrefix(tableName) {
+    if (!tableName) return '';
+    const idx = tableName.indexOf('_');
+    if (idx > 0 && idx <= 15) {
+      return tableName.slice(0, idx).toLowerCase();
+    }
+    return '';
+  }
+
+  _getPrefixGroupsMap(tables) {
+    const rawCounts = new Map();
+    tables.forEach(t => {
+      const p = this._extractTablePrefix(t.name);
+      if (p) {
+        if (!rawCounts.has(p)) rawCounts.set(p, []);
+        rawCounts.get(p).push(t);
+      }
+    });
+
+    const groups = new Map();
+    const ungrouped = [];
+
+    tables.forEach(t => {
+      const p = this._extractTablePrefix(t.name);
+      if (p && rawCounts.get(p).length >= 2) {
+        const key = `${p}_*`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(t);
+      } else {
+        ungrouped.push(t);
+      }
+    });
+
+    if (groups.size > 0 && ungrouped.length > 0) {
+      groups.set('Otros / Sin prefijo', ungrouped);
+    }
+
+    return groups;
+  }
+
+  _openSelectiveImportPanel(conn, schema) {
+    this.pendingImportConn = conn;
+    this.pendingSchema = schema;
+
+    const currentState = this.stateManager.getState();
+    const existingNames = new Set((currentState.tables || []).map(t => t.name.toLowerCase()));
+
+    // Pre-select tables that are not yet in the diagram (or all if all are already in the diagram)
+    this.selectedImportTableIds = new Set();
+    const newTables = (schema.tables || []).filter(t => !existingNames.has(t.name.toLowerCase()));
+    if (newTables.length > 0) {
+      newTables.forEach(t => this.selectedImportTableIds.add(t.id));
+    } else {
+      (schema.tables || []).forEach(t => this.selectedImportTableIds.add(t.id));
+    }
+
+    if (this.importConnTitle) {
+      this.importConnTitle.textContent = `Importar desde: ${conn.name} (${schema.tables.length} tablas)`;
+    }
+    if (this.importSearchInput) {
+      this.importSearchInput.value = '';
+    }
+    if (this.importGroupNameInput) {
+      this.importGroupNameInput.value = conn.name || 'Importación MCP';
+    }
+    if (this.importOverwriteCheckbox) {
+      this.importOverwriteCheckbox.checked = false;
+    }
+
+    // Populate existing diagram groups
+    const existingGroups = currentState.groups || [];
+    if (this.importExistingGroupSelect) {
+      this.importExistingGroupSelect.innerHTML = '';
+      existingGroups.forEach(g => {
+        const opt = document.createElement('option');
+        opt.value = g.id;
+        opt.textContent = g.name;
+        this.importExistingGroupSelect.appendChild(opt);
+      });
+    }
+
+    if (this.importGroupModeSelect) {
+      const existingOption = this.importGroupModeSelect.querySelector('option[value="existing"]');
+      if (existingOption) {
+        existingOption.disabled = existingGroups.length === 0;
+      }
+      this.importGroupModeSelect.value = 'none';
+      this._handleImportGroupModeChange();
+    }
+
+    this.switchTab('import');
+    this._renderPrefixGroups();
+    this._renderImportTablesList();
+    this._updateImportSelectionCounter();
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  _handleImportGroupModeChange() {
+    const mode = this.importGroupModeSelect?.value || 'none';
+    this.importGroupNameInput?.classList.toggle('hidden', mode !== 'single');
+    this.importExistingGroupSelect?.classList.toggle('hidden', mode !== 'existing');
+  }
+
+  _renderPrefixGroups() {
+    if (!this.importPrefixSection || !this.importPrefixGroups || !this.pendingSchema) return;
+    const tables = this.pendingSchema.tables || [];
+    const groupsMap = this._getPrefixGroupsMap(tables);
+
+    this.importPrefixGroups.innerHTML = '';
+    if (groupsMap.size === 0) {
+      this.importPrefixSection.classList.add('hidden');
+      return;
+    }
+
+    this.importPrefixSection.classList.remove('hidden');
+
+    groupsMap.forEach((groupTables, groupLabel) => {
+      const selectedCount = groupTables.filter(t => this.selectedImportTableIds.has(t.id)).length;
+      const allSelected = selectedCount === groupTables.length;
+      const someSelected = selectedCount > 0 && !allSelected;
+
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.style.cssText = `
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.74rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        transition: all 0.15s ease;
+        border: 1px solid ${allSelected ? 'var(--color-primary)' : someSelected ? 'rgba(99, 102, 241, 0.5)' : 'var(--color-border)'};
+        background: ${allSelected ? 'rgba(99, 102, 241, 0.2)' : someSelected ? 'rgba(99, 102, 241, 0.08)' : 'var(--color-bg-primary)'};
+        color: ${allSelected ? '#818cf8' : 'var(--color-text-main)'};
+        font-weight: ${allSelected || someSelected ? '600' : '400'};
+      `;
+      chip.innerHTML = `
+        <span>${this._escape(groupLabel)}</span>
+        <span style="opacity: 0.75; font-size: 0.68rem;">(${selectedCount}/${groupTables.length})</span>
+      `;
+      chip.title = allSelected ? `Desmarcar grupo ${groupLabel}` : `Marcar grupo ${groupLabel}`;
+
+      chip.addEventListener('click', () => {
+        const shouldSelect = !allSelected;
+        groupTables.forEach(t => {
+          if (shouldSelect) {
+            this.selectedImportTableIds.add(t.id);
+          } else {
+            this.selectedImportTableIds.delete(t.id);
+          }
+        });
+        this._renderPrefixGroups();
+        this._renderImportTablesList();
+        this._updateImportSelectionCounter();
+      });
+
+      this.importPrefixGroups.appendChild(chip);
+    });
+  }
+
+  _getFilteredImportTables() {
+    if (!this.pendingSchema) return [];
+    const tables = this.pendingSchema.tables || [];
+    const query = (this.importSearchInput?.value || '').trim().toLowerCase();
+    if (!query) return tables;
+    return tables.filter(t => t.name.toLowerCase().includes(query));
+  }
+
+  _renderImportTablesList() {
+    if (!this.importTablesList || !this.pendingSchema) return;
+    this.importTablesList.innerHTML = '';
+
+    const filtered = this._getFilteredImportTables();
+    const relationships = this.pendingSchema.relationships || [];
+    const currentState = this.stateManager.getState();
+    const existingNames = new Set((currentState.tables || []).map(t => t.name.toLowerCase()));
+
+    if (filtered.length === 0) {
+      this.importTablesList.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 20px; color: var(--color-text-muted); font-size: 0.8rem;">
+          No hay tablas que coincidan con el filtro.
+        </div>
+      `;
+      return;
+    }
+
+    // Count FK relations per table
+    const fkCounts = new Map();
+    relationships.forEach(r => {
+      fkCounts.set(r.fromTable, (fkCounts.get(r.fromTable) || 0) + 1);
+      if (r.toTable !== r.fromTable) {
+        fkCounts.set(r.toTable, (fkCounts.get(r.toTable) || 0) + 1);
+      }
+    });
+
+    filtered.forEach(tbl => {
+      const isSelected = this.selectedImportTableIds.has(tbl.id);
+      const alreadyExists = existingNames.has(tbl.name.toLowerCase());
+      const colsCount = (tbl.fields || []).length;
+      const relCount = fkCounts.get(tbl.id) || 0;
+
+      const item = document.createElement('label');
+      item.style.cssText = `
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 7px 10px;
+        border-radius: 6px;
+        border: 1px solid ${isSelected ? 'rgba(99, 102, 241, 0.5)' : 'var(--color-border)'};
+        background: ${isSelected ? 'rgba(99, 102, 241, 0.08)' : 'var(--color-bg-tertiary)'};
+        cursor: pointer;
+        user-select: none;
+        font-size: 0.8rem;
+      `;
+
+      const existsBadge = alreadyExists
+        ? `<span style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; flex-shrink: 0;" title="Esta tabla ya existe en el diagrama">En diagrama</span>`
+        : '';
+
+      item.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1;">
+          <input type="checkbox" data-table-id="${tbl.id}" ${isSelected ? 'checked' : ''} style="cursor: pointer; flex-shrink: 0;" />
+          <span style="font-weight: 500; color: var(--color-text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this._escape(tbl.name)}">${this._escape(tbl.name)}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+          ${existsBadge}
+          <span style="font-size: 0.68rem; color: var(--color-text-muted); background: var(--color-bg-primary); padding: 1px 5px; border-radius: 4px;">${colsCount}c${relCount > 0 ? ` · ${relCount}fk` : ''}</span>
+        </div>
+      `;
+
+      const checkbox = item.querySelector('input[type="checkbox"]');
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+          this.selectedImportTableIds.add(tbl.id);
+        } else {
+          this.selectedImportTableIds.delete(tbl.id);
+        }
+        this._renderPrefixGroups();
+        this._renderImportTablesList();
+        this._updateImportSelectionCounter();
+      });
+
+      this.importTablesList.appendChild(item);
+    });
+  }
+
+  _toggleVisibleTables(select) {
+    const visible = this._getFilteredImportTables();
+    visible.forEach(t => {
+      if (select) {
+        this.selectedImportTableIds.add(t.id);
+      } else {
+        this.selectedImportTableIds.delete(t.id);
+      }
+    });
+    this._renderPrefixGroups();
+    this._renderImportTablesList();
+    this._updateImportSelectionCounter();
+  }
+
+  _selectRelatedTables() {
+    if (!this.pendingSchema) return;
+    if (this.selectedImportTableIds.size === 0) {
+      this.uiManager.showToast('Selecciona al menos una tabla primero para buscar sus relacionadas.', 'info');
+      return;
+    }
+
+    const relationships = this.pendingSchema.relationships || [];
+    let added = 0;
+    const currentSelected = new Set(this.selectedImportTableIds);
+
+    relationships.forEach(rel => {
+      if (currentSelected.has(rel.fromTable) && !this.selectedImportTableIds.has(rel.toTable)) {
+        this.selectedImportTableIds.add(rel.toTable);
+        added++;
+      }
+      if (currentSelected.has(rel.toTable) && !this.selectedImportTableIds.has(rel.fromTable)) {
+        this.selectedImportTableIds.add(rel.fromTable);
+        added++;
+      }
+    });
+
+    if (added > 0) {
+      this._renderPrefixGroups();
+      this._renderImportTablesList();
+      this._updateImportSelectionCounter();
+      this.uiManager.showToast(`Se añadieron ${added} tabla(s) relacionada(s) por FK.`, 'success');
+    } else {
+      this.uiManager.showToast('Todas las tablas directamente relacionadas ya están seleccionadas.', 'info');
+    }
+  }
+
+  _updateImportSelectionCounter() {
+    if (!this.importSelectionCount || !this.pendingSchema) return;
+    const total = (this.pendingSchema.tables || []).length;
+    const selected = this.selectedImportTableIds.size;
+    this.importSelectionCount.textContent = `${selected} de ${total} seleccionadas`;
+    if (this.btnConfirmImport) {
+      this.btnConfirmImport.disabled = selected === 0;
+    }
+  }
+
+  executeSelectiveImport() {
+    if (!this.pendingSchema) return;
+    const allSchemaTables = this.pendingSchema.tables || [];
+    const allSchemaRels = this.pendingSchema.relationships || [];
+    const selectedTables = allSchemaTables.filter(t => this.selectedImportTableIds.has(t.id));
+
+    if (selectedTables.length === 0) {
+      this.uiManager.showToast('Selecciona al menos una tabla para importar.', 'error');
+      return;
+    }
+
+    const overwriteExisting = Boolean(this.importOverwriteCheckbox?.checked);
+    const groupMode = this.importGroupModeSelect?.value || 'none';
+
+    const prevState = this.stateManager.getState();
+    this.history.push(prevState);
+
+    const currentTables = JSON.parse(JSON.stringify(prevState.tables || []));
+    const currentRels = JSON.parse(JSON.stringify(prevState.relationships || []));
+    const currentGroups = JSON.parse(JSON.stringify(prevState.groups || []));
+
+    // Palette for newly created groups
+    const groupColors = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#14b8a6'];
+    let singleTargetGroupId = null;
+
+    if (groupMode === 'single') {
+      const groupName = (this.importGroupNameInput?.value || '').trim() || (this.pendingImportConn?.name || 'Importación MCP');
+      const existingGroup = currentGroups.find(g => g.name.toLowerCase() === groupName.toLowerCase());
+      if (existingGroup) {
+        singleTargetGroupId = existingGroup.id;
+      } else {
+        singleTargetGroupId = `grp-mcp-${Date.now()}`;
+        currentGroups.push({
+          id: singleTargetGroupId,
+          name: groupName,
+          color: groupColors[currentGroups.length % groupColors.length],
+          x: 60,
+          y: 60,
+          width: 600,
+          height: 400
+        });
+      }
+    } else if (groupMode === 'existing') {
+      singleTargetGroupId = this.importExistingGroupSelect?.value || null;
+    }
+
+    // Prefix group creation if groupMode === 'prefix'
+    const prefixToGroupId = new Map();
+    if (groupMode === 'prefix') {
+      const prefixCounts = new Map();
+      selectedTables.forEach(t => {
+        const p = this._extractTablePrefix(t.name);
+        if (p) prefixCounts.set(p, (prefixCounts.get(p) || 0) + 1);
+      });
+
+      prefixCounts.forEach((count, prefix) => {
+        if (count >= 2) {
+          const groupName = `Módulo ${prefix.toUpperCase()}`;
+          let grp = currentGroups.find(g => g.name.toLowerCase() === groupName.toLowerCase() || g.name.toLowerCase() === prefix.toLowerCase());
+          if (!grp) {
+            grp = {
+              id: `grp-mcp-${Date.now()}-${prefix}`,
+              name: groupName,
+              color: groupColors[currentGroups.length % groupColors.length],
+              x: 60,
+              y: 60,
+              width: 600,
+              height: 400
+            };
+            currentGroups.push(grp);
+          }
+          prefixToGroupId.set(prefix, grp.id);
+        }
+      });
+    }
+
+    // Map existing tables by lowercase name
+    const existingByName = new Map();
+    currentTables.forEach(t => existingByName.set(t.name.toLowerCase(), t));
+
+    // Map introspected table ID -> actual table object in mergedTables
+    const schemaTableById = new Map();
+    allSchemaTables.forEach(t => schemaTableById.set(t.id, t));
+
+    let addedCount = 0;
+    let updatedCount = 0;
+
+    selectedTables.forEach(newTbl => {
+      const nameKey = newTbl.name.toLowerCase();
+      let targetGroupId = undefined;
+      if (groupMode === 'single' || groupMode === 'existing') {
+        targetGroupId = singleTargetGroupId;
+      } else if (groupMode === 'prefix') {
+        const p = this._extractTablePrefix(newTbl.name);
+        if (p && prefixToGroupId.has(p)) {
+          targetGroupId = prefixToGroupId.get(p);
+        }
+      }
+
+      const existingTbl = existingByName.get(nameKey);
+      if (!existingTbl) {
+        const tblToAdd = {
+          ...newTbl,
+          ...(targetGroupId ? { groupId: targetGroupId } : {})
+        };
+        currentTables.push(tblToAdd);
+        existingByName.set(nameKey, tblToAdd);
+        addedCount++;
+      } else if (overwriteExisting) {
+        // Update fields while preserving existing table ID, coordinates, and existing field IDs where names match
+        const oldFieldsByName = new Map((existingTbl.fields || []).map(f => [f.name.toLowerCase(), f]));
+        existingTbl.fields = (newTbl.fields || []).map((nf, idx) => {
+          const oldF = oldFieldsByName.get(nf.name.toLowerCase());
+          return {
+            ...nf,
+            id: oldF ? oldF.id : `fld-${existingTbl.id}-${Date.now()}-${idx}`
+          };
+        });
+        if (targetGroupId) {
+          existingTbl.groupId = targetGroupId;
+        }
+        updatedCount++;
+      } else if (targetGroupId && !existingTbl.groupId) {
+        existingTbl.groupId = targetGroupId;
+      }
+    });
+
+    // Resolve relationships between any tables present in the diagram (newly added or previously existing)
+    // as long as at least one endpoint was in the selected import set
+    const selectedIdsSet = this.selectedImportTableIds;
+    const existingRelKeys = new Set(
+      currentRels.map(r => `${r.fromTable}:${r.fromField}->${r.toTable}:${r.toField}`)
+    );
+
+    let addedRelsCount = 0;
+    allSchemaRels.forEach((rel, idx) => {
+      if (!selectedIdsSet.has(rel.fromTable) && !selectedIdsSet.has(rel.toTable)) {
+        return;
+      }
+
+      const schemaFromTbl = schemaTableById.get(rel.fromTable);
+      const schemaToTbl = schemaTableById.get(rel.toTable);
+      if (!schemaFromTbl || !schemaToTbl) return;
+
+      const actualFromTbl = existingByName.get(schemaFromTbl.name.toLowerCase());
+      const actualToTbl = existingByName.get(schemaToTbl.name.toLowerCase());
+      if (!actualFromTbl || !actualToTbl) return;
+
+      const schemaFromFld = (schemaFromTbl.fields || []).find(f => f.id === rel.fromField);
+      const schemaToFld = (schemaToTbl.fields || []).find(f => f.id === rel.toField);
+      if (!schemaFromFld || !schemaToFld) return;
+
+      const actualFromFld = (actualFromTbl.fields || []).find(f => f.name.toLowerCase() === schemaFromFld.name.toLowerCase());
+      const actualToFld = (actualToTbl.fields || []).find(f => f.name.toLowerCase() === schemaToFld.name.toLowerCase());
+      if (!actualFromFld || !actualToFld) return;
+
+      const relKey = `${actualFromTbl.id}:${actualFromFld.id}->${actualToTbl.id}:${actualToFld.id}`;
+      if (!existingRelKeys.has(relKey)) {
+        existingRelKeys.add(relKey);
+        currentRels.push({
+          ...rel,
+          id: `rel-mcp-${Date.now()}-${idx}`,
+          fromTable: actualFromTbl.id,
+          fromField: actualFromFld.id,
+          toTable: actualToTbl.id,
+          toField: actualToFld.id
+        });
+        addedRelsCount++;
+      }
+    });
+
+    this.stateManager.setState({
+      ...prevState,
+      tables: currentTables,
+      relationships: currentRels,
+      groups: currentGroups
+    });
+
+    const summaryParts = [`${addedCount} nueva(s)`];
+    if (updatedCount > 0) summaryParts.push(`${updatedCount} actualizada(s)`);
+    if (addedRelsCount > 0) summaryParts.push(`${addedRelsCount} relación(es)`);
+
+    this.uiManager.showToast(`Importación completada: ${summaryParts.join(', ')}.`, 'success');
+
+    if (this.diagramController) {
+      this.diagramController.refreshUI();
+      if (addedCount > 0) {
+        this.diagramController.autoLayout();
+      }
+    }
+
+    this.closeModal();
   }
 
   _showStatus(message, type = 'info') {

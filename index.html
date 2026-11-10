@@ -466,6 +466,76 @@
 						</div>
 					</div>
 
+					<!-- Panel 3: Selective Schema Import -->
+					<div id="mcp-panel-import" class="hidden" style="display: flex; flex-direction: column; gap: 12px; background: var(--color-bg-tertiary); padding: 14px; border-radius: 8px; border: 1px solid var(--color-border);">
+						<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+							<div style="display: flex; align-items: center; gap: 8px;">
+								<button id="btn-mcp-back-from-import" class="btn btn-secondary" style="font-size: 0.78rem; padding: 4px 10px;">
+									<i data-lucide="arrow-left" style="width: 13px; height: 13px;"></i> Volver
+								</button>
+								<strong id="mcp-import-conn-title" style="font-size: 0.9rem; color: var(--color-text-main);">Seleccionar Tablas a Importar</strong>
+							</div>
+							<span id="mcp-import-selection-count" style="font-size: 0.78rem; color: var(--color-primary); font-weight: 600;">0 seleccionadas</span>
+						</div>
+
+						<!-- Search & Bulk Actions -->
+						<div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+							<div style="flex: 1; min-width: 200px; position: relative;">
+								<input type="text" id="mcp-import-search" placeholder="Filtrar tablas por nombre o prefijo (ej: users, nom_)..." style="width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-primary); color: var(--color-text-main); font-size: 0.82rem;" />
+							</div>
+							<button type="button" id="btn-mcp-select-all" class="btn btn-secondary" style="font-size: 0.75rem; padding: 5px 10px;" title="Seleccionar todas las tablas visibles en el filtro">
+								Marcar visibles
+							</button>
+							<button type="button" id="btn-mcp-deselect-all" class="btn btn-secondary" style="font-size: 0.75rem; padding: 5px 10px;" title="Deseleccionar todas las tablas visibles en el filtro">
+								Desmarcar visibles
+							</button>
+							<button type="button" id="btn-mcp-select-related" class="btn btn-secondary" style="font-size: 0.75rem; padding: 5px 10px; border-color: rgba(99, 102, 241, 0.4); color: #818cf8;" title="Añadir a la selección las tablas conectadas por llave foránea (FK) con las actualmente seleccionadas">
+								<i data-lucide="git-branch" style="width: 12px; height: 12px;"></i> + Relacionadas (FK)
+							</button>
+						</div>
+
+						<!-- Prefix / Table Groups Chips -->
+						<div id="mcp-import-prefix-section" class="hidden" style="display: flex; flex-direction: column; gap: 6px;">
+							<span style="font-size: 0.74rem; color: var(--color-text-muted); font-weight: 600;">Grupos por prefijo / módulo (clic para alternar grupo):</span>
+							<div id="mcp-import-prefix-groups" style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 75px; overflow-y: auto;">
+								<!-- Dynamic prefix chips -->
+							</div>
+						</div>
+
+						<!-- Tables Checklist -->
+						<div id="mcp-import-tables-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; max-height: 260px; overflow-y: auto; padding: 8px; background: var(--color-bg-primary); border: 1px solid var(--color-border); border-radius: 6px;">
+							<!-- Dynamic table checkboxes -->
+						</div>
+
+						<!-- Grouping & Import Options -->
+						<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding-top: 6px; border-top: 1px solid var(--color-border);">
+							<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+								<div style="display: flex; align-items: center; gap: 6px;">
+									<label for="mcp-import-group-mode" style="font-size: 0.78rem; color: var(--color-text-muted);">Agrupar en lienzo:</label>
+									<select id="mcp-import-group-mode" style="padding: 5px 8px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-primary); color: var(--color-text-main); font-size: 0.78rem;">
+										<option value="none">Sin agrupar</option>
+										<option value="prefix">Por prefijo de tabla (Automático)</option>
+										<option value="single">En un solo grupo nuevo</option>
+										<option value="existing">En un grupo existente...</option>
+									</select>
+								</div>
+								<input type="text" id="mcp-import-group-name" class="hidden" placeholder="Nombre del grupo..." style="padding: 5px 8px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-primary); color: var(--color-text-main); font-size: 0.78rem; width: 170px;" />
+								<select id="mcp-import-existing-group" class="hidden" style="padding: 5px 8px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-bg-primary); color: var(--color-text-main); font-size: 0.78rem; width: 170px;"></select>
+								<label style="display: flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--color-text-main); cursor: pointer;" title="Si una tabla seleccionada ya está en el diagrama, actualiza sus campos con los de la BD">
+									<input type="checkbox" id="mcp-import-overwrite-existing" />
+									<span>Actualizar tablas existentes</span>
+								</label>
+							</div>
+
+							<div style="display: flex; gap: 8px;">
+								<button type="button" id="btn-mcp-cancel-import" class="btn btn-secondary" style="font-size: 0.8rem; padding: 6px 12px;">Cancelar</button>
+								<button type="button" id="btn-mcp-confirm-import" class="btn btn-primary" style="font-size: 0.8rem; padding: 6px 14px;">
+									<i data-lucide="download" style="width: 13px; height: 13px;"></i> Importar Seleccionadas
+								</button>
+							</div>
+						</div>
+					</div>
+
 					<div id="mcp-test-status" class="hidden" style="padding: 10px; border-radius: 6px; font-size: 0.8rem; line-height: 1.4;"></div>
 				</div>
 			</div>
